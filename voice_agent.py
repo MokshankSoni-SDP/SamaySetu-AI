@@ -117,6 +117,8 @@ async def run_voice_agent():
                                     }
                                 )
 
+                            await asyncio.to_thread(speak_gujarati, "કૃપા કરીને બે ક્ષણ રાહ જો જો...")
+
                             if brain_res.status_code == 200:
                                 ai_reply = brain_res.json().get("reply")
                                 print(f"🤖 AI: {ai_reply}")

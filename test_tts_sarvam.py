@@ -45,6 +45,6 @@ def test_gujarati_tts(text_to_speak):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    guj_text = "નમસ્તે મોક્ષઆંક, તમારી ૧૧ વાગ્યાની અપોઇન્ટમેન્ટ બુક થઈ ગઈ છે."
+    guj_text = "નમસ્તે મોક્ષ આંક, તમારી ૧૧ વાગ્યાની અપોઇન્ટમેન્ટ બુક થઈ ગઈ છે."
     test_gujarati_tts(guj_text)
 
