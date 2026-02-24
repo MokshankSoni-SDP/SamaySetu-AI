@@ -24,7 +24,7 @@ def test_gujarati_tts(text_to_speak):
             text=text_to_speak,
             target_language_code="gu-IN",
             model="bulbul:v3",
-            speaker="simran",
+            speaker="ritu",
             pace=1.0
         )
         
@@ -45,5 +45,6 @@ def test_gujarati_tts(text_to_speak):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    guj_text = "નમસ્તે મોક્ષામ, તમારી ૧૧ વાગ્યાની અપોઇન્ટમેન્ટ બુક થઈ ગઈ છે."
+    guj_text = "નમસ્તે મોક્ષઆંક, તમારી ૧૧ વાગ્યાની અપોઇન્ટમેન્ટ બુક થઈ ગઈ છે."
     test_gujarati_tts(guj_text)
+
