@@ -1,0 +1,37 @@
+import datetime
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+import os
+from dotenv import load_dotenv
+
+# Load environment variables From project root
+env_path = '.env'
+load_dotenv(dotenv_path=env_path)
+
+# Load your service account JSON file
+SERVICE_ACCOUNT_FILE = 'service_account.json' 
+CALENDAR_ID = os.getenv('CALENDER_ID')
+
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+service = build('calendar', 'v3', credentials=creds)
+
+def check_calendar_availability(start_time_str: str):
+    """Checks if a 30-minute slot is free in Google Calendar."""
+    # Convert input (e.g. "2026-02-24T11:00:00") to ISO format
+    start_dt = datetime.datetime.fromisoformat(start_time_str)
+    end_dt = start_dt + datetime.timedelta(minutes=30)
+    
+    body = {
+        "timeMin": start_dt.isoformat() + "Z",
+        "timeMax": end_dt.isoformat() + "Z",
+        "items": [{"id": CALENDAR_ID}]
+    }
+    
+    query = service.freebusy().query(body=body).execute()
+    busy_slots = query['calendars'][CALENDAR_ID]['busy']
+    
+    if not busy_slots:
+        return f"Slot {start_time_str} is FREE."
+    else:
+        return f"Slot {start_time_str} is BUSY."
