@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # LangChain Imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-from calendar_tool import check_calendar_availability
+from calendar_tool import check_calendar_availability, book_appointment
 
 # 1. Setup & Environment
 load_dotenv()
@@ -23,7 +23,8 @@ chat_sessions: Dict[str, List] = {}
 # 3. Model Initialization
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 # Bind tools so the brain knows it can "act"
-llm_with_tools = llm.bind_tools([check_calendar_availability])
+tools = [check_calendar_availability, book_appointment]
+llm_with_tools = llm.bind_tools(tools)
 
 # 4. Request Schema
 class UserRequest(BaseModel):
@@ -41,9 +42,12 @@ async def process_request(request: UserRequest):
                 You are a helpful Gujarati appointment assistant. 
                 1. Always reply in Gujarati.
                 2. Use the 'check_calendar_availability' tool to check slots.
-                3. Assume today's date is 2026-02-24.
-                4. If a slot is free, confirm it in Gujarati. If busy, suggest another time.
-                5. Remember previous context (dates/times) discussed in the chat.
+                3. ONLY use 'book_appointment' after the user explicitly confirms they want to book a free slot.
+                4. Assume today's date is 2026-02-24.
+                5. If a slot is free, confirm it in Gujarati. If busy, suggest another time.
+                6. Remember previous context (dates/times) discussed in the chat.
+                7. Once booked successfully, provide the confirmation in Gujarati.
+                8. IMPORTANT: All user requests are in Indian Standard Time (IST) and the current country is also India.
             """)
         ]
     
@@ -55,20 +59,29 @@ async def process_request(request: UserRequest):
     ai_msg = llm_with_tools.invoke(history)
     
     # Step 2: Handle Tool Calls (The "Acting" part)
+    # Inside process_request, replace Step 2 with this:
     if ai_msg.tool_calls:
-        history.append(ai_msg) # Record the AI's intent to use a tool
+        history.append(ai_msg)
         
         for tool_call in ai_msg.tool_calls:
-            # Execute the actual Python function from calendar_tool.py
-            observation = check_calendar_availability(**tool_call["args"])
+            # Route to the correct tool based on the name Gemini selected
+            tool_name = tool_call["name"]
+            args = tool_call["args"]
+
+            print("TOOL CALL ARGS:", args)
             
-            # Create a ToolMessage to feed the result back to the AI
-            # This is critical for the AI to "see" the result
-            tool_message = ToolMessage(
+            if tool_name == "check_calendar_availability":
+                observation = check_calendar_availability(**args)
+            elif tool_name == "book_appointment":
+                observation = book_appointment(**args)
+            else:
+                observation = "Error: Tool not found."
+    
+            # Feed the result back to Gemini
+            history.append(ToolMessage(
                 content=observation,
                 tool_call_id=tool_call["id"]
-            )
-            history.append(tool_message)
+            ))
             
         # Step 3: Call the model again with the tool result to get the final Gujarati text
         final_response = llm.invoke(history)
