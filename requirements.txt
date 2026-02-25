@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+langchain
+langchain-google-genai
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+pytz
+httpx
+pyaudio
+sounddevice
+soundfile
+sarvamai
