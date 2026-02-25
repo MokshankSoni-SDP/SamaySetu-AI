@@ -62,3 +62,53 @@ def book_appointment(start_time_str: str, summary: str = "AI Appointment"):
     ).execute()
 
     return f"SUCCESS: Appointment booked."
+
+def find_event_id(start_time_str: str):
+    """Helper to find an event ID based on a start time."""
+    naive_dt = datetime.datetime.fromisoformat(start_time_str)
+    start_dt = IST.localize(naive_dt)
+    # Search window: 1 minute before/after to be safe
+    time_min = (start_dt - datetime.timedelta(minutes=1)).isoformat()
+    time_max = (start_dt + datetime.timedelta(minutes=1)).isoformat()
+
+    events_result = service.events().list(
+        calendarId=CALENDAR_ID,
+        timeMin=time_min,
+        timeMax=time_max,
+        singleEvents=True
+    ).execute()
+    
+    events = events_result.get('items', [])
+    return events[0]['id'] if events else None
+
+def cancel_appointment(start_time_str: str):
+    """Deletes an appointment at the given start time."""
+    event_id = find_event_id(start_time_str)
+    if not event_id:
+        return f"Error: No appointment found at {start_time_str} to cancel."
+    
+    service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+    return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
+
+def reschedule_appointment(old_start_time_str: str, new_start_time_str: str):
+    """Moves an appointment from an old time to a new time."""
+    event_id = find_event_id(old_start_time_str)
+    if not event_id:
+        return f"Error: No appointment found at {old_start_time_str}."
+
+    # First, check if the NEW slot is free
+    availability = check_calendar_availability(new_start_time_str)
+    if "BUSY" in availability:
+        return f"Error: The new slot {new_start_time_str} is already occupied."
+
+    # Get existing event to keep the summary/description
+    event = service.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
+    
+    new_naive_dt = datetime.datetime.fromisoformat(new_start_time_str)
+    new_end_dt = new_naive_dt + datetime.timedelta(minutes=30)
+
+    event['start']['dateTime'] = new_naive_dt.strftime('%Y-%m-%dT%H:%M:%S')
+    event['end']['dateTime'] = new_end_dt.strftime('%Y-%m-%dT%H:%M:%S')
+
+    service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
+    return f"SUCCESS: Appointment moved from {old_start_time_str} to {new_start_time_str}."
