@@ -57,6 +57,15 @@ async def run_voice_agent():
     session_id = "user_mokshank_007"
     transcript_buffer = ""
 
+    #1️⃣ PLAY GREETING FIRST
+    greeting_text = "નમસ્તે! હું સમયસેતુ AI છું. હું તમારી કેવી રીતે મદદ કરી શકું?"
+    print(f"🤖 AI Greeting: {greeting_text}")
+    try:
+        # We use to_thread so the code doesn't freeze while playing audio
+        await asyncio.to_thread(speak_gujarati, greeting_text)
+    except Exception as e:
+        print(f"Initial Greeting Error: {e}")
+
     async with client_stt.speech_to_text_streaming.connect(
         model="saaras:v3",
         mode="transcribe",
