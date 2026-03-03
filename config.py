@@ -1,0 +1,3 @@
+DEFAULT_APPOINTMENT_DURATION = 30  # In minutes
+
+CALENDAR_TIMEZONE = 'Asia/Kolkata'

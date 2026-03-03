@@ -4,6 +4,7 @@ from googleapiclient.discovery import build
 import os
 import pytz
 from dotenv import load_dotenv
+import config
 
 load_dotenv()
 
@@ -15,14 +16,23 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 service = build('calendar', 'v3', credentials=creds)
 
-IST = pytz.timezone('Asia/Kolkata')
+IST = pytz.timezone(config.CALENDAR_TIMEZONE)
 
-def check_calendar_availability(start_time_str: str):
+def is_past_time(start_time_str: str):
+    naive_dt = datetime.datetime.fromisoformat(start_time_str)
+    start_dt = IST.localize(naive_dt)
+    now_dt = datetime.datetime.now(IST)
+    return start_dt <= now_dt
+
+def check_calendar_availability(start_time_str: str,duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
     """Checks if a 30-minute slot is free in Google Calendar."""
+
+    if is_past_time(start_time_str):
+        return "Error: Cannot book an appointment in the past."
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
-    end_dt = start_dt + datetime.timedelta(minutes=30)
+    end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
     
     body = {
         "timeMin": start_dt.isoformat() ,
@@ -38,10 +48,18 @@ def check_calendar_availability(start_time_str: str):
     else:
         return f"Slot {start_time_str} is BUSY."
 
-def book_appointment(start_time_str: str, summary: str = "AI Appointment"):
+def book_appointment(start_time_str: str, summary: str = "AI Appointment", duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
+    
+    if is_past_time(start_time_str):
+        return "Error: Cannot book an appointment in the past."
+
+    availability = check_calendar_availability(start_time_str)
+    if "BUSY" in availability:
+        return "Error: Slot already occupied."
+
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     
-    end_dt = naive_dt + datetime.timedelta(minutes=30)
+    end_dt = naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event = {
         'summary': summary,
@@ -90,7 +108,7 @@ def cancel_appointment(start_time_str: str):
     service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
     return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
 
-def reschedule_appointment(old_start_time_str: str, new_start_time_str: str):
+def reschedule_appointment(old_start_time_str: str, new_start_time_str: str, duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
     """Moves an appointment from an old time to a new time."""
     event_id = find_event_id(old_start_time_str)
     if not event_id:
@@ -105,7 +123,7 @@ def reschedule_appointment(old_start_time_str: str, new_start_time_str: str):
     event = service.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
     
     new_naive_dt = datetime.datetime.fromisoformat(new_start_time_str)
-    new_end_dt = new_naive_dt + datetime.timedelta(minutes=30)
+    new_end_dt = new_naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event['start']['dateTime'] = new_naive_dt.strftime('%Y-%m-%dT%H:%M:%S')
     event['end']['dateTime'] = new_end_dt.strftime('%Y-%m-%dT%H:%M:%S')
