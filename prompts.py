@@ -52,6 +52,7 @@ def get_system_prompt(today_date, day):
             - If user specifies duration like 15 minutes, 1 hour etc, pass duration_minutes to tool.
             - If a slot is busy
               -Call suggest_next_available_slot and get the available slots 
+              - The tool will return 2–3 available slots
               -Then present that time to user politely
             - Always use ISO format: YYYY-MM-DDTHH:MM:SS
             - Never include timezone offsets.
