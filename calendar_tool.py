@@ -29,6 +29,11 @@ def check_calendar_availability(start_time_str: str,duration_minutes: int = conf
 
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
+    
+    # NEW: Business Hours Check
+    if not is_within_business_hours(start_time_str):
+        return (f"Error: We only accept appointments between {config.BUSINESS_START_HOUR}:00 AM "
+                f"and {config.BUSINESS_END_HOUR}:00 PM. Please choose a different time.")
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
@@ -166,3 +171,12 @@ def reschedule_appointment(old_start_time_str: str, new_start_time_str: str, dur
 
     service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
     return f"SUCCESS: Appointment moved from {old_start_time_str} to {new_start_time_str}."
+
+def is_within_business_hours(start_time_str: str):
+    naive_dt = datetime.datetime.fromisoformat(start_time_str)
+    hour = naive_dt.hour
+    
+    # Check if the time falls between 9 AM and 6 PM
+    if config.BUSINESS_START_HOUR <= hour < config.BUSINESS_END_HOUR:
+        return True
+    return False
