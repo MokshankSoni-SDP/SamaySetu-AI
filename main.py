@@ -11,7 +11,7 @@ import prompts
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-from calendar_tool import (check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment)
+from calendar_tool import (check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment, suggest_next_available_slot)
 
 from datetime import datetime
 today_date = datetime.now().strftime("%Y-%m-%d")
@@ -40,7 +40,7 @@ llm = ChatGroq(
 )
 
 # Bind tools so the brain knows it can "act"
-tools = [check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment]
+tools = [check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment,suggest_next_available_slot]
 llm_with_tools = llm.bind_tools(tools)
 
 # 4. Request Schema
@@ -69,8 +69,7 @@ async def process_request(request: UserRequest):
     ai_msg = llm_with_tools.invoke(history)
     
     # Step 2: Handle Tool Calls (The "Acting" part)
-    # Inside process_request, replace Step 2 with this:
-    if ai_msg.tool_calls:
+    while ai_msg.tool_calls:
         history.append(ai_msg)
         
         for tool_call in ai_msg.tool_calls:
@@ -78,7 +77,7 @@ async def process_request(request: UserRequest):
             tool_name = tool_call["name"]
             args = tool_call["args"]
 
-            print("TOOL CALL ARGS:", args)
+            print("TOOL CALL ARGS:",tool_name, args)
             
             if tool_name == "check_calendar_availability":
                 observation = check_calendar_availability(**args)
@@ -88,20 +87,25 @@ async def process_request(request: UserRequest):
                 observation = cancel_appointment(**args)
             elif tool_name == "reschedule_appointment":
                 observation = reschedule_appointment(**args)
+            elif tool_name == "suggest_next_available_slot":
+                observation = suggest_next_available_slot(**args)
             else:
                 observation = "Error: Tool not found."
     
             # Feed the result back to Gemini
-            history.append(ToolMessage(
-                content=str(observation),
-                tool_call_id=tool_call["id"]
-            ))
-            
-        # Step 3: Call the model again with the tool result to get the final Gujarati text
-        final_response = llm.invoke(history)
-        history.append(final_response)
-        return {"reply": final_response.content}
-    
-    # If no tool was needed, just save the AI's direct response and return
+            history.append(
+                ToolMessage(
+                    content=str(observation),
+                    tool_call_id=tool_call["id"]
+                )
+            )
+        
+        # IMPORTANT
+        ai_msg = llm_with_tools.invoke(history)
+
+    # Now we have the final text response
     history.append(ai_msg)
+    
     return {"reply": ai_msg.content}
+    
+    

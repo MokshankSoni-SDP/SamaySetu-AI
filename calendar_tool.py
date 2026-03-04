@@ -48,6 +48,30 @@ def check_calendar_availability(start_time_str: str,duration_minutes: int = conf
     else:
         return f"Slot {start_time_str} is BUSY."
 
+
+def suggest_next_available_slot(start_time_str: str,
+                                 duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+                                 search_hours: int = 4):
+
+    naive_dt = datetime.datetime.fromisoformat(start_time_str)
+    start_dt = IST.localize(naive_dt)
+
+    end_search = start_dt + datetime.timedelta(hours=search_hours)
+
+    current = start_dt + datetime.timedelta(minutes=30)
+
+    while current < end_search:
+        availability = check_calendar_availability(
+            current.strftime("%Y-%m-%dT%H:%M:%S"),
+            duration_minutes
+        )
+        if "FREE" in availability:
+            print(f"Next available slot: {current.strftime('%Y-%m-%dT%H:%M:%S')}")
+            return f"Next available slot: {current.strftime('%Y-%m-%dT%H:%M:%S')}"
+        current += datetime.timedelta(minutes=30)
+
+    return "No available slot found in next few hours."
+
 def book_appointment(start_time_str: str, summary: str = "AI Appointment", duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
     
     if is_past_time(start_time_str):
