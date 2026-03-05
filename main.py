@@ -24,6 +24,8 @@ os.environ["GOOGLE_API_KEY"] = gemini_api_key
 
 groq_api_key = os.getenv('GROQ_API_KEY')
 
+MAX_HISTORY = 5
+
 app = FastAPI()
 
 # 2. Memory: In-memory dictionary to store history for each session
@@ -65,8 +67,20 @@ async def process_request(request: UserRequest):
     history = chat_sessions[sid]
     history.append(HumanMessage(content=request.text))
     
+    def print_token_usage(msg, step_name):
+        usage = msg.response_metadata.get("token_usage", {})
+        if usage:
+            print(f"--- 📊 Token Usage: {step_name} ---")
+            print(f"Prompt Tokens: {usage.get('prompt_tokens')}")
+            print(f"Completion Tokens: {usage.get('completion_tokens')}")
+            print(f"Total Tokens: {usage.get('total_tokens')}")
+            print(f"-----------------------------------\n")
+
     # Step 1: Ask Gemini what to do (It might respond with text OR a tool call)
-    ai_msg = llm_with_tools.invoke(history)
+    recent_history = [history[0]] + history[-MAX_HISTORY:]
+    ai_msg = llm_with_tools.invoke(recent_history)
+    print("First llm call :")
+    print_token_usage(ai_msg, "Initial Reasoning")
     
     # Step 2: Handle Tool Calls (The "Acting" part)
     while ai_msg.tool_calls:
@@ -101,11 +115,13 @@ async def process_request(request: UserRequest):
             )
         
         # IMPORTANT
-        ai_msg = llm_with_tools.invoke(history)
+        recent_history = [history[0]] + history[-MAX_HISTORY:]
+        ai_msg = llm_with_tools.invoke(recent_history)
+        print_token_usage(ai_msg, "Post-Tool Reasoning")
 
     # Now we have the final text response
     history.append(ai_msg)
-    
+
     return {"reply": ai_msg.content}
     
     
