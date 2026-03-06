@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="gu">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SamaySetu AI - Gujarati Voice Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen">
+    <div class="p-8 bg-gray-800 rounded-2xl shadow-2xl text-center w-96">
+        <h1 class="text-3xl font-bold mb-4 text-blue-400">સમયસેતુ AI</h1>
+        <div id="status" class="mb-6 text-gray-400">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
+
+        <button id="micBtn"
+            class="bg-blue-600 hover:bg-blue-500 p-6 rounded-full transition-all transform hover:scale-110">
+            <svg id="micIcon" class="w-10 h-10" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                    d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0 5 5 0 01-10 0 1 1 0 00-2 0 7.001 7.001 0 005.945 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-2.945v-2.07z">
+                </path>
+            </svg>
+        </button>
+
+        <div id="chat-box"
+            class="mt-8 text-left text-sm h-32 overflow-y-auto border-t border-gray-700 pt-4 italic text-gray-300">
+            તમારો સંદેશ અહીં દેખાશે...
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let audioContext;
+        let processor;
+        const micBtn = document.getElementById('micBtn');
+        const status = document.getElementById('status');
+        const chatBox = document.getElementById('chat-box');
+
+        async function startStreaming() {
+            socket = new WebSocket(`ws://${window.location.host}/ws/voice`);
+            socket.binaryType = 'arraybuffer';
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new AudioContext({ sampleRate: 16000 });
+            const source = audioContext.createMediaStreamSource(stream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+            processor.onaudioprocess = (e) => {
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcmData = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                }
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(pcmData.buffer);
+                }
+            };
+
+            socket.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'transcript') chatBox.innerText = "તમે: " + data.text;
+                if (data.type === 'ai_reply') {
+                    chatBox.innerText = "AI: " + data.text;
+                    const audio = new Audio("data:audio/wav;base64," + data.audio);
+                    audio.play();
+                }
+            };
+
+            status.innerText = "સાંભળી રહ્યો છું...";
+            micBtn.classList.replace('bg-blue-600', 'bg-red-600');
+        }
+
+        micBtn.onclick = async () => {
+            // 1. Ensure AudioContext is initialized and resumed
+            if (!audioContext) {
+                audioContext = new AudioContext({ sampleRate: 16000 });
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+        
+            // 2. Manage WebSocket connection
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                startStreaming();
+            } else {
+                // Stop and reset for next turn
+                window.location.reload();
+            }
+        };
+    </script>
+</body>
+
+</html>

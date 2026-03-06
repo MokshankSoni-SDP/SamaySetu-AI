@@ -1,127 +1,132 @@
 import os
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Dict, List
+import json
+import base64
+import asyncio
+import traceback
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from sarvamai import AsyncSarvamAI, SarvamAI
 from dotenv import load_dotenv
+from typing import Dict, List
 
-import config
 import prompts
-
-# LangChain Imports
-from langchain_google_genai import ChatGoogleGenerativeAI
+from calendar_tool import *
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-from calendar_tool import (check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment, suggest_next_available_slot)
-
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from datetime import datetime
-today_date = datetime.now().strftime("%Y-%m-%d")
-day = datetime.now().strftime("%A")
 
 # 1. Setup & Environment
 load_dotenv()
-gemini_api_key = os.getenv('GEMINI_API_KEY')
-os.environ["GOOGLE_API_KEY"] = gemini_api_key
-
-groq_api_key = os.getenv('GROQ_API_KEY')
-
-MAX_HISTORY = 5
-
 app = FastAPI()
 
-# 2. Memory: In-memory dictionary to store history for each session
-# Key: session_id (e.g., "user_123"), Value: List of Messages
-chat_sessions: Dict[str, List] = {}
+SARVAM_API_KEY = os.getenv('SARVAM_API_KEY')
+client_stt = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
+client_tts = SarvamAI(api_subscription_key=SARVAM_API_KEY)
 
-# 3. Model Initialization
-#llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-# Using Llama-3.3-70b-versatile for high reasoning & tool calling accuracy
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    groq_api_key=groq_api_key,
-    temperature=0.1 # Kept low for consistent tool calling
-)
-
-# Bind tools so the brain knows it can "act"
-tools = [check_calendar_availability, book_appointment,cancel_appointment,reschedule_appointment,suggest_next_available_slot]
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+tools = [check_calendar_availability, book_appointment, cancel_appointment, reschedule_appointment, suggest_next_available_slot]
 llm_with_tools = llm.bind_tools(tools)
 
-# 4. Request Schema
-class UserRequest(BaseModel):
-    session_id: str  # Added to track different users/calls
-    text: str
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.post("/chat")
-async def process_request(request: UserRequest):
-    sid = request.session_id
+# --- RESTORED MEMORY LOGIC ---
+chat_sessions: Dict[str, List] = {}
+MAX_HISTORY = 5
+
+def print_token_usage(msg, step_name):
+    usage = msg.response_metadata.get("token_usage", {})
+    if usage:
+        print(f"--- 📊 Token Usage: {step_name} ---")
+        print(f"Prompt Tokens: {usage.get('prompt_tokens')}")
+        print(f"Completion Tokens: {usage.get('completion_tokens')}")
+        print(f"Total Tokens: {usage.get('total_tokens')}")
+        print(f"-----------------------------------\n")
+
+# 2. Updated Shared Brain Logic with History Persistence
+async def run_brain(session_id, user_text):
+    today = datetime.now().strftime("%Y-%m-%d")
+    day = datetime.now().strftime("%A")
+
+    # Initialize history if session is new
+    if session_id not in chat_sessions:
+        system_content = prompts.get_system_prompt(today, day)
+        chat_sessions[session_id] = [SystemMessage(content=system_content)]
     
-    # Initialize history for new sessions
-    if sid not in chat_sessions:
-
-        system_content = prompts.get_system_prompt(today_date, day)
-
-        chat_sessions[sid] = [
-            SystemMessage(content=system_content)
-        ]
+    history = chat_sessions[session_id]
+    history.append(HumanMessage(content=user_text))
     
-    # Retrieve existing history and add the new user message
-    history = chat_sessions[sid]
-    history.append(HumanMessage(content=request.text))
-    
-    def print_token_usage(msg, step_name):
-        usage = msg.response_metadata.get("token_usage", {})
-        if usage:
-            print(f"--- 📊 Token Usage: {step_name} ---")
-            print(f"Prompt Tokens: {usage.get('prompt_tokens')}")
-            print(f"Completion Tokens: {usage.get('completion_tokens')}")
-            print(f"Total Tokens: {usage.get('total_tokens')}")
-            print(f"-----------------------------------\n")
-
-    # Step 1: Ask Gemini what to do (It might respond with text OR a tool call)
+    # Sliding window: Always keep System Message + the last N interactions
     recent_history = [history[0]] + history[-MAX_HISTORY:]
+    
+    print(f"DEBUG: Calling LLM for session {session_id}...")
     ai_msg = llm_with_tools.invoke(recent_history)
-    print("First llm call :")
     print_token_usage(ai_msg, "Initial Reasoning")
     
-    # Step 2: Handle Tool Calls (The "Acting" part)
     while ai_msg.tool_calls:
         history.append(ai_msg)
-        
         for tool_call in ai_msg.tool_calls:
-            # Route to the correct tool based on the name Gemini selected
             tool_name = tool_call["name"]
             args = tool_call["args"]
-
-            print("TOOL CALL ARGS:",tool_name, args)
+            print(f"DEBUG: Tool Call: {tool_name}({args})")
             
-            if tool_name == "check_calendar_availability":
-                observation = check_calendar_availability(**args)
-            elif tool_name == "book_appointment":
-                observation = book_appointment(**args)
-            elif tool_name == "cancel_appointment":
-                observation = cancel_appointment(**args)
-            elif tool_name == "reschedule_appointment":
-                observation = reschedule_appointment(**args)
-            elif tool_name == "suggest_next_available_slot":
-                observation = suggest_next_available_slot(**args)
-            else:
-                observation = "Error: Tool not found."
-    
-            # Feed the result back to Gemini
-            history.append(
-                ToolMessage(
-                    content=str(observation),
-                    tool_call_id=tool_call["id"]
-                )
-            )
+            func = globals()[tool_name]
+            observation = func(**args)
+            
+            history.append(ToolMessage(content=str(observation), tool_call_id=tool_call["id"]))
         
-        # IMPORTANT
         recent_history = [history[0]] + history[-MAX_HISTORY:]
         ai_msg = llm_with_tools.invoke(recent_history)
         print_token_usage(ai_msg, "Post-Tool Reasoning")
-
-    # Now we have the final text response
+    
     history.append(ai_msg)
+    
+    # Get TTS Audio
+    tts_res = client_tts.text_to_speech.convert(
+        text=ai_msg.content, target_language_code="gu-IN", 
+        model="bulbul:v3", speaker="simran"
+    )
+    return ai_msg.content, tts_res.audios[0]
 
-    return {"reply": ai_msg.content}
+# 3. WebSocket Relay
+@app.websocket("/ws/voice")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    # Unique ID for the web session
+    session_id = f"web_{datetime.now().strftime('%H%M%S')}"
+    print(f"DEBUG: Connection opened. Session: {session_id}")
     
-    
+    async with client_stt.speech_to_text_streaming.connect(
+        model="saaras:v3", language_code="gu-IN", sample_rate=16000
+    ) as sarvam_ws:
+        
+        async def browser_to_sarvam():
+            try:
+                while True:
+                    data = await websocket.receive_bytes()
+                    await sarvam_ws.transcribe(audio=base64.b64encode(data).decode("utf-8"))
+            except (WebSocketDisconnect, Exception):
+                pass
+
+        async def sarvam_to_browser():
+            try:
+                async for response in sarvam_ws:
+                    if hasattr(response, "type") and response.type == "data":
+                        transcript = getattr(response.data, 'transcript', "").strip()
+                        if transcript:
+                            await websocket.send_json({"type": "transcript", "text": transcript})
+                            
+                            is_final = getattr(response.data, 'is_final', False)
+                            # End of sentence detection
+                            if is_final or transcript.endswith(('.', '?', '!', '।')):
+                                print(f"DEBUG: Sentence Complete: {transcript}")
+                                reply_text, audio_b64 = await run_brain(session_id, transcript)
+                                
+                                await websocket.send_json({
+                                    "type": "ai_reply", 
+                                    "text": reply_text, 
+                                    "audio": audio_b64
+                                })
+            except Exception:
+                print(f"DEBUG Error:\n{traceback.format_exc()}")
+
+        await asyncio.gather(browser_to_sarvam(), sarvam_to_browser())
