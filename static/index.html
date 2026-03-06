@@ -2,49 +2,1376 @@
 <html lang="gu">
 
 <head>
-    <meta charset="UTF-8">
-    <title>SamaySetu AI - Gujarati Voice Assistant</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SamaySetu AI — Gujarati Voice Booking</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Sans+Gujarati:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <style>
+        :root {
+            --bg: #0a0c10;
+            --surface: #10141c;
+            --panel: #151a26;
+            --border: #1e2538;
+            --accent: #f5a623;
+            --accent2: #e05c2a;
+            --text: #e8dcc8;
+            --muted: #6b7280;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --info: #60a5fa;
+            --glow: rgba(245, 166, 35, 0.15);
+            --radius: 14px;
+            --font-display: 'Cinzel', serif;
+            --font-body: 'Noto Sans Gujarati', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-body);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* ── Noise grain overlay ── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ── Ambient gradient blobs ── */
+        .blob {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.12;
+            pointer-events: none;
+            z-index: 0;
+            animation: drift 12s ease-in-out infinite alternate;
+        }
+
+        .blob-1 {
+            width: 400px;
+            height: 400px;
+            background: var(--accent);
+            top: -100px;
+            left: -100px;
+            animation-duration: 14s;
+        }
+
+        .blob-2 {
+            width: 300px;
+            height: 300px;
+            background: var(--accent2);
+            bottom: -80px;
+            right: -80px;
+            animation-duration: 10s;
+        }
+
+        .blob-3 {
+            width: 250px;
+            height: 250px;
+            background: #6366f1;
+            top: 40%;
+            left: 30%;
+            animation-duration: 18s;
+        }
+
+        @keyframes drift {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+
+            to {
+                transform: translate(30px, 20px) scale(1.05);
+            }
+        }
+
+        /* ── Layout ── */
+        .app {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            grid-template-rows: auto 1fr auto;
+            gap: 0;
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 32px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(10, 12, 16, 0.8);
+            backdrop-filter: blur(12px);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-mark {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            font-family: var(--font-display);
+            font-size: 18px;
+            font-weight: 700;
+            color: #0a0c10;
+            box-shadow: 0 0 24px var(--glow);
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-display);
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--accent);
+            letter-spacing: 0.05em;
+        }
+
+        .logo-text span {
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: background 0.4s, box-shadow 0.4s;
+        }
+
+        .status-dot.live {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* ── Sidebar panels ── */
+        .sidebar {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 24px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+        }
+
+        .sidebar.right {
+            border-right: none;
+            border-left: 1px solid var(--border);
+        }
+
+        .panel-title {
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 12px;
+        }
+
+        /* Config cards */
+        .config-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+        }
+
+        .config-card label {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            letter-spacing: 0.05em;
+        }
+
+        .config-card select,
+        .config-card input[type="range"],
+        .config-card input[type="number"],
+        .config-card input[type="text"] {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: var(--font-body);
+            font-size: 13px;
+            padding: 8px 10px;
+            outline: none;
+            transition: border-color 0.2s;
+            appearance: none;
+        }
+
+        .config-card select:focus,
+        .config-card input:focus {
+            border-color: var(--accent);
+        }
+
+        .config-card select option {
+            background: var(--bg);
+        }
+
+        .range-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .range-row input[type="range"] {
+            flex: 1;
+            padding: 0;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .range-val {
+            font-size: 13px;
+            color: var(--accent);
+            font-family: var(--font-mono);
+            min-width: 32px;
+            text-align: right;
+        }
+
+        /* Toggle switch */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            color: var(--text);
+        }
+
+        .toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            inset: 0;
+            background: var(--border);
+            border-radius: 22px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            top: 3px;
+            background: var(--muted);
+            border-radius: 50%;
+            transition: transform 0.3s, background 0.3s;
+        }
+
+        .toggle input:checked+.toggle-slider {
+            background: rgba(245, 166, 35, 0.25);
+        }
+
+        .toggle input:checked+.toggle-slider::before {
+            transform: translateX(18px);
+            background: var(--accent);
+        }
+
+        /* Business hours grid */
+        .hours-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .hours-grid label {
+            font-size: 11px;
+            color: var(--muted);
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .hours-grid input[type="number"] {
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
+        /* Quick book buttons */
+        .quick-slots {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .slot-btn {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 11px;
+            padding: 7px 4px;
+            cursor: pointer;
+            font-family: var(--font-body);
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .slot-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--glow);
+        }
+
+        /* ── Center stage ── */
+        .main-stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 40px 24px;
+            gap: 32px;
+        }
+
+        /* Visualizer ring */
+        .mic-ring-wrap {
+            position: relative;
+            display: grid;
+            place-items: center;
+        }
+
+        .ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid var(--accent);
+            opacity: 0;
+            animation: none;
+        }
+
+        .ring-1 {
+            width: 130px;
+            height: 130px;
+        }
+
+        .ring-2 {
+            width: 165px;
+            height: 165px;
+        }
+
+        .ring-3 {
+            width: 200px;
+            height: 200px;
+        }
+
+        .is-listening .ring {
+            animation: ripple 2s ease-out infinite;
+            opacity: 0;
+        }
+
+        .is-listening .ring-1 {
+            animation-delay: 0s;
+        }
+
+        .is-listening .ring-2 {
+            animation-delay: 0.4s;
+        }
+
+        .is-listening .ring-3 {
+            animation-delay: 0.8s;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: scale(0.85);
+                opacity: 0.6;
+            }
+
+            100% {
+                transform: scale(1.25);
+                opacity: 0;
+            }
+        }
+
+        /* Mic button */
+        .mic-btn {
+            position: relative;
+            z-index: 2;
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 0 0 0 var(--glow);
+            transition: transform 0.2s, box-shadow 0.3s;
+            display: grid;
+            place-items: center;
+        }
+
+        .mic-btn:hover {
+            transform: scale(1.06);
+            box-shadow: 0 0 40px var(--glow);
+        }
+
+        .mic-btn:active {
+            transform: scale(0.96);
+        }
+
+        .mic-btn.listening {
+            background: linear-gradient(135deg, #ef4444, #b91c1c);
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3);
+            animation: mic-pulse 1.2s ease-in-out infinite;
+        }
+
+        @keyframes mic-pulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+            }
+
+            50% {
+                box-shadow: 0 0 50px rgba(239, 68, 68, 0.6);
+            }
+        }
+
+        .mic-btn svg {
+            width: 36px;
+            height: 36px;
+            color: #0a0c10;
+        }
+
+        /* Waveform canvas */
+        #waveCanvas {
+            width: 100%;
+            max-width: 480px;
+            height: 60px;
+            border-radius: 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            display: block;
+        }
+
+        /* State label */
+        .state-label {
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+            text-align: center;
+            min-height: 20px;
+            transition: color 0.3s;
+        }
+
+        .state-label.active {
+            color: var(--accent);
+        }
+
+        /* Chat feed */
+        .chat-feed {
+            width: 100%;
+            max-width: 560px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+        }
+
+        .chat-clear-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 11px;
+            font-family: var(--font-body);
+            padding: 2px 8px;
+            border-radius: 4px;
+            transition: color 0.2s;
+        }
+
+        .chat-clear-btn:hover {
+            color: var(--danger);
+        }
+
+        .chat-body {
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .chat-body::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .chat-body::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        .msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            animation: slide-in 0.3s ease;
+        }
+
+        @keyframes slide-in {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .msg.user {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            align-self: flex-end;
+        }
+
+        .msg.ai {
+            background: linear-gradient(135deg, rgba(245, 166, 35, 0.08), rgba(224, 92, 42, 0.06));
+            border: 1px solid rgba(245, 166, 35, 0.2);
+            align-self: flex-start;
+        }
+
+        .msg-meta {
+            font-size: 10px;
+            color: var(--muted);
+            margin-top: 4px;
+            font-family: var(--font-mono);
+        }
+
+        /* Transcript ticker */
+        .transcript-box {
+            width: 100%;
+            max-width: 560px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 15px;
+            color: var(--text);
+            min-height: 44px;
+            font-style: italic;
+            letter-spacing: 0.02em;
+        }
+
+        .transcript-box.empty {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        /* ── Right sidebar — Session & Logs ── */
+        .session-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .stat-row .k {
+            color: var(--muted);
+        }
+
+        .stat-row .v {
+            font-family: var(--font-mono);
+            color: var(--accent);
+            font-size: 12px;
+        }
+
+        /* Tool log */
+        .tool-log {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            padding: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            color: var(--muted);
+        }
+
+        .tool-log::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        .tool-log::-webkit-scrollbar-thumb {
+            background: var(--border);
+        }
+
+        .log-line {
+            display: flex;
+            gap: 8px;
+        }
+
+        .log-line .ts {
+            color: var(--border);
+            flex-shrink: 0;
+        }
+
+        .log-line .tool {
+            color: var(--info);
+        }
+
+        .log-line .result.ok {
+            color: var(--success);
+        }
+
+        .log-line .result.err {
+            color: var(--danger);
+        }
+
+        /* Upcoming appointments */
+        .appt-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .appt-item {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 12px;
+        }
+
+        .appt-item .time {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .appt-item .name {
+            font-size: 13px;
+            margin: 2px 0;
+        }
+
+        .appt-item .tag {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 8px;
+            background: rgba(34, 197, 94, 0.12);
+            color: var(--success);
+            border-radius: 20px;
+            letter-spacing: 0.05em;
+        }
+
+        /* ── Footer ── */
+        footer {
+            grid-column: 1 / -1;
+            border-top: 1px solid var(--border);
+            padding: 10px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--muted);
+            background: rgba(10, 12, 16, 0.85);
+            backdrop-filter: blur(8px);
+        }
+
+        .footer-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .footer-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--font-body);
+            transition: all 0.2s;
+        }
+
+        .footer-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .footer-btn.danger:hover {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        /* ── Notification toast ── */
+        .toast-container {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .toast {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-size: 13px;
+            color: var(--text);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            animation: toast-in 0.3s ease;
+        }
+
+        .toast.success {
+            border-color: var(--success);
+            color: var(--success);
+        }
+
+        .toast.error {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        @keyframes toast-in {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ── Modal overlay ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            place-items: center;
+        }
+
+        .modal-overlay.open {
+            display: grid;
+        }
+
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 32px;
+            width: 360px;
+            max-width: 90vw;
+            animation: slide-in 0.3s ease;
+        }
+
+        .modal h2 {
+            font-family: var(--font-display);
+            font-size: 18px;
+            color: var(--accent);
+            margin-bottom: 4px;
+        }
+
+        .modal p {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 24px;
+        }
+
+        .modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            font-family: var(--font-body);
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.85;
+        }
+
+        .btn.primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #0a0c10;
+            font-weight: 600;
+        }
+
+        .btn.ghost {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .app {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                display: none;
+            }
+
+            header {
+                padding: 14px 20px;
+            }
+
+            .main-stage {
+                padding: 28px 16px;
+            }
+        }
+    </style>
 </head>
 
-<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen">
-    <div class="p-8 bg-gray-800 rounded-2xl shadow-2xl text-center w-96">
-        <h1 class="text-3xl font-bold mb-4 text-blue-400">સમયસેતુ AI</h1>
-        <div id="status" class="mb-6 text-gray-400">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
 
-        <button id="micBtn"
-            class="bg-blue-600 hover:bg-blue-500 p-6 rounded-full transition-all transform hover:scale-110">
-            <svg id="micIcon" class="w-10 h-10" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                    d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0 5 5 0 01-10 0 1 1 0 00-2 0 7.001 7.001 0 005.945 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-2.945v-2.07z">
-                </path>
-            </svg>
-        </button>
+    <!-- Toast container -->
+    <div class="toast-container" id="toastContainer"></div>
 
-        <div id="chat-box"
-            class="mt-8 text-left text-sm h-32 overflow-y-auto border-t border-gray-700 pt-4 italic text-gray-300">
-            તમારો સંદેશ અહીં દેખાશે...
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <h2>Advanced Settings</h2>
+            <p>Configure voice & session parameters</p>
+            <div class="modal-body">
+                <div>
+                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">STT
+                        Language</label>
+                    <select id="sttLang"
+                        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;">
+                        <option value="gu-IN" selected>Gujarati (gu-IN)</option>
+                        <option value="hi-IN">Hindi (hi-IN)</option>
+                        <option value="en-IN">English India (en-IN)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">TTS
+                        Speaker</label>
+                    <select id="ttsSpeaker"
+                        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;">
+                        <option value="simran" selected>Simran (Female)</option>
+                        <option value="meera">Meera (Female)</option>
+                        <option value="arjun">Arjun (Male)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Session Memory
+                        (turns)</label>
+                    <input type="number" id="maxHistory" min="2" max="20" value="5"
+                        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;" />
+                </div>
+                <div>
+                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Sample
+                        Rate</label>
+                    <select id="sampleRate"
+                        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;">
+                        <option value="16000" selected>16000 Hz (recommended)</option>
+                        <option value="8000">8000 Hz</option>
+                        <option value="22050">22050 Hz</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn ghost" onclick="closeModal('settingsModal')">Cancel</button>
+                <button class="btn primary" onclick="saveSettings()">Save Settings</button>
+            </div>
         </div>
     </div>
 
-    <script>
-        let socket;
-        let audioContext;
-        let processor;
-        const micBtn = document.getElementById('micBtn');
-        const status = document.getElementById('status');
-        const chatBox = document.getElementById('chat-box');
+    <div class="app">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <div class="logo-mark">સ</div>
+                <div class="logo-text">
+                    <h1>SamaySetu AI</h1>
+                    <span>Gujarati Voice Booking Assistant</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="status-dot" id="connDot"></div>
+                <span id="connLabel">Disconnected</span>
+            </div>
+        </header>
 
+        <!-- Left Sidebar — Configuration -->
+        <aside class="sidebar">
+            <div>
+                <div class="panel-title">Voice Configuration</div>
+                <div class="config-card">
+                    <label>Input Language</label>
+                    <select id="sideLang" onchange="syncLang(this)">
+                        <option value="gu-IN" selected>Gujarati (gu-IN)</option>
+                        <option value="hi-IN">Hindi (hi-IN)</option>
+                        <option value="en-IN">English (en-IN)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- <div>
+                <div class="panel-title">Output Voice</div>
+                <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label>TTS Speaker</label>
+                        <select id="sideSpeak" onchange="syncSpeaker(this)">
+                            <option value="simran" selected>Simran (Female)</option>
+                            <option value="meera">Meera (Female)</option>
+                            <option value="arjun">Arjun (Male)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Playback Volume</label>
+                        <div class="range-row">
+                            <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1"
+                                oninput="document.getElementById('volVal').textContent=Math.round(this.value*100)+'%'">
+                            <span class="range-val" id="volVal">100%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Playback Speed</label>
+                        <div class="range-row">
+                            <input type="range" id="speedSlider" min="0.5" max="2" step="0.1" value="1"
+                                oninput="document.getElementById('speedVal').textContent=this.value+'x'">
+                            <span class="range-val" id="speedVal">1x</span>
+                        </div>
+                    </div>
+                </div>
+            </div> -->
+
+            <div>
+                <div class="panel-title">Business Hours</div>
+                <div class="config-card">
+                    <div class="hours-grid">
+                        <div>
+                            <label>Open (hr)</label>
+                            <input type="number" id="bizStart" value="9" min="0" max="23" />
+                        </div>
+                        <div>
+                            <label>Close (hr)</label>
+                            <input type="number" id="bizEnd" value="18" min="1" max="24" />
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <label>Slot Duration (min)</label>
+                        <select id="slotDuration"
+                            style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;margin-top:2px;">
+                            <option value="15">15 min</option>
+                            <option value="30" selected>30 min</option>
+                            <option value="45">45 min</option>
+                            <option value="60">60 min</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel-title">Behavior</div>
+                <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
+                    <div class="toggle-row">
+                        <span>Auto-listen after reply</span>
+                        <label class="toggle"><input type="checkbox" id="autoListen"><span
+                                class="toggle-slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span>Show raw transcript</span>
+                        <label class="toggle"><input type="checkbox" id="showTranscript" checked><span
+                                class="toggle-slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span>Tool call logging</span>
+                        <label class="toggle"><input type="checkbox" id="toolLogging" checked><span
+                                class="toggle-slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span>Sound effects</span>
+                        <label class="toggle"><input type="checkbox" id="sfxEnabled" checked><span
+                                class="toggle-slider"></span></label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- <div>
+                <div class="panel-title">Quick Slots (Today)</div>
+                <div class="quick-slots" id="quickSlots"></div>
+            </div> -->
+        </aside>
+
+        <!-- Main Stage -->
+        <main class="main-stage">
+            <!-- Mic with rings -->
+            <div class="mic-ring-wrap" id="micRingWrap">
+                <div class="ring ring-1"></div>
+                <div class="ring ring-2"></div>
+                <div class="ring ring-3"></div>
+                <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Click to speak">
+                    <svg id="micIcon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 005 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- State label -->
+            <div class="state-label" id="stateLabel">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
+
+            <!-- Live transcript -->
+            <div class="transcript-box empty" id="transcriptBox">
+                તમારો અવાજ અહીં દેખાશે...
+            </div>
+
+            <!-- Waveform -->
+            <canvas id="waveCanvas" width="560" height="60"></canvas>
+
+            <!-- Chat feed -->
+            <div class="chat-feed">
+                <div class="chat-header">
+                    <span>Conversation History</span>
+                    <button class="chat-clear-btn" onclick="clearChat()">Clear</button>
+                </div>
+                <div class="chat-body" id="chatBody">
+                    <div class="msg ai">
+                        <div>નમસ્તે! હું SamaySetu AI છું. હું તમારી એપોઇન્ટમેન્ટ બુક કરવામાં મદદ કરીશ.</div>
+                        <div class="msg-meta">SamaySetu AI · now</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar — Session & Logs -->
+        <aside class="sidebar right">
+            <div>
+                <div class="panel-title">Session Info</div>
+                <div class="session-card">
+                    <div class="stat-row"><span class="k">Session ID</span><span class="v" id="statSession">—</span>
+                    </div>
+                    <div class="stat-row"><span class="k">Messages</span><span class="v" id="statMsgs">0</span></div>
+                    <div class="stat-row"><span class="k">Tool Calls</span><span class="v" id="statTools">0</span></div>
+                    <div class="stat-row"><span class="k">Duration</span><span class="v" id="statDur">0:00</span></div>
+                    <div class="stat-row"><span class="k">Status</span><span class="v" id="statStatus">Idle</span></div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel-title">Tool Call Log</div>
+                <div class="tool-log" id="toolLog">
+                    <div style="color:var(--border);">— awaiting tool calls —</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel-title">Recent Appointments</div>
+                <div class="appt-list" id="apptList">
+                    <div style="font-size:12px;color:var(--muted);">No appointments this session.</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel-title">Connection</div>
+                <div class="config-card" style="display:flex;flex-direction:column;gap:10px;">
+                    <div class="stat-row">
+                        <span class="k" style="font-size:12px;">WS Endpoint</span>
+                        <span class="v" style="font-size:10px;" id="wsEndpoint">/ws/voice</span>
+                    </div>
+                    <!-- <div class="stat-row">
+                        <span class="k" style="font-size:12px;">Ping</span>
+                        <span class="v" id="wsPing">—</span>
+                    </div> -->
+                    <div class="stat-row">
+                        <span class="k" style="font-size:12px;">Packets sent</span>
+                        <span class="v" id="wsPackets">0</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Footer -->
+        <footer>
+            <div>© 2025 SamaySetu AI &nbsp;·&nbsp; Powered by Sarvam + Groq + Google Calendar</div>
+            <div class="footer-actions">
+                <button class="footer-btn" onclick="openModal('settingsModal')">⚙ Settings</button>
+                <button class="footer-btn" onclick="exportLog()">↓ Export Log</button>
+                <button class="footer-btn danger" onclick="resetSession()">↺ Reset Session</button>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // ── State ──────────────────────────────────────────────────────────────
+        let socket, audioContext, processor, analyser, animFrame;
+        let isListening = false;
+        let sessionStart = null;
+        let durTimer = null;
+        let msgCount = 0, toolCount = 0, packetCount = 0;
+        let currentAudio = null;
+
+        const settings = {
+            lang: 'gu-IN', speaker: 'simran', volume: 1, speed: 1,
+            sampleRate: 16000, maxHistory: 5,
+            autoListen: false, showTranscript: true, toolLogging: true, sfx: true
+        };
+
+        const appointmentLog = [];
+
+        // ── DOM refs ───────────────────────────────────────────────────────────
+        const micBtn = document.getElementById('micBtn');
+        const micRingWrap = document.getElementById('micRingWrap');
+        const stateLabel = document.getElementById('stateLabel');
+        const transcriptBox = document.getElementById('transcriptBox');
+        const chatBody = document.getElementById('chatBody');
+        const connDot = document.getElementById('connDot');
+        const connLabel = document.getElementById('connLabel');
+        const toolLogEl = document.getElementById('toolLog');
+        const canvas = document.getElementById('waveCanvas');
+        const ctx2d = canvas.getContext('2d');
+
+        // ── Quick slots ────────────────────────────────────────────────────────
+        function buildQuickSlots() {
+            const now = new Date();
+            const slots = [];
+            const start = parseInt(document.getElementById('bizStart').value);
+            const end = parseInt(document.getElementById('bizEnd').value);
+            for (let h = start; h < end; h += 2) {
+                slots.push(`${String(h).padStart(2, '0')}:00`);
+                if (slots.length >= 6) break;
+            }
+            const container = document.getElementById('quickSlots');
+            container.innerHTML = slots.map(t =>
+                `<button class="slot-btn" onclick="suggestSlotQuery('${t}')">${t}</button>`
+            ).join('');
+        }
+
+        function suggestSlotQuery(time) {
+            const msg = `${time} વાગ્યે appointment ઉપલબ્ધ છે?`;
+            addMessage('user', msg);
+            showToast(`"${msg}" — spoken to AI`);
+        }
+
+        // ── Waveform ───────────────────────────────────────────────────────────
+        function drawWave(data) {
+            const W = canvas.width, H = canvas.height;
+            ctx2d.clearRect(0, 0, W, H);
+            ctx2d.strokeStyle = isListening ? '#f5a623' : '#1e2538';
+            ctx2d.lineWidth = 2;
+            ctx2d.beginPath();
+            const step = Math.ceil(data.length / W);
+            for (let i = 0; i < W; i++) {
+                const s = data[i * step] / 128.0;
+                const y = (s * H) / 2;
+                i === 0 ? ctx2d.moveTo(i, y) : ctx2d.lineTo(i, y);
+            }
+            ctx2d.stroke();
+        }
+
+        function drawIdleWave() {
+            const W = canvas.width, H = canvas.height;
+            ctx2d.clearRect(0, 0, W, H);
+            ctx2d.strokeStyle = '#1e2538';
+            ctx2d.lineWidth = 1.5;
+            ctx2d.beginPath();
+            for (let i = 0; i < W; i++) {
+                const y = H / 2 + Math.sin((i + Date.now() * 0.03) * 0.04) * 6;
+                i === 0 ? ctx2d.moveTo(i, y) : ctx2d.lineTo(i, y);
+            }
+            ctx2d.stroke();
+            animFrame = requestAnimationFrame(drawIdleWave);
+        }
+
+        function startWaveform() {
+            if (animFrame) cancelAnimationFrame(animFrame);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            const data = new Uint8Array(analyser.frequencyBinCount);
+            function tick() {
+                analyser.getByteTimeDomainData(data);
+                drawWave(data);
+                animFrame = requestAnimationFrame(tick);
+            }
+            tick();
+            return analyser;
+        }
+
+        // ── WebSocket & Mic ───────────────────────────────────────────────────
         async function startStreaming() {
             socket = new WebSocket(`ws://${window.location.host}/ws/voice`);
             socket.binaryType = 'arraybuffer';
+            document.getElementById('wsEndpoint').textContent = `/ws/voice`;
+            document.getElementById('statSession').textContent = `ses_${Date.now().toString(36)}`;
+
+            socket.onopen = () => setConn(true);
+            socket.onclose = () => { setConn(false); stopMic(); };
+            socket.onerror = () => showToast('WebSocket error', 'error');
+
+            socket.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'transcript') {
+                    if (settings.showTranscript) {
+                        transcriptBox.classList.remove('empty');
+                        transcriptBox.textContent = data.text;
+                    }
+                    // Detect tool calls from transcript keywords
+                    detectToolFromText(data.text);
+                }
+
+                if (data.type === 'ai_reply') {
+                    setStatus('Responding…', true);
+                    addMessage('ai', data.text);
+                    msgCount++;
+                    document.getElementById('statMsgs').textContent = msgCount;
+
+                    // Detect booked appointments
+                    if (/SUCCESS.*Appointment booked/i.test(data.text) || /એપોઇન્ટ.*બુક/i.test(data.text)) {
+                        logAppointment(data.text);
+                    }
+
+                    if (data.audio) {
+                        const blob = b64ToBlob(data.audio, 'audio/wav');
+                        const url = URL.createObjectURL(blob);
+                        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+                        currentAudio = new Audio(url);
+                        currentAudio.volume = settings.volume;
+                        currentAudio.playbackRate = settings.speed;
+                        currentAudio.play();
+                        currentAudio.onended = () => {
+                            setStatus('Ready', false);
+                            if (settings.autoListen && document.getElementById('autoListen').checked) {
+                                setTimeout(toggleMic, 500);
+                            }
+                        };
+                    } else {
+                        setStatus('Ready', false);
+                    }
+                }
+
+                // Ping measurement
+                if (data.type === 'pong') {
+                    document.getElementById('wsPing').textContent =
+                        (Date.now() - data._sent) + 'ms';
+                }
+            };
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContext = new AudioContext({ sampleRate: 16000 });
+            audioContext = new AudioContext({ sampleRate: settings.sampleRate });
             const source = audioContext.createMediaStreamSource(stream);
+            const wave = startWaveform();
             processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-            source.connect(processor);
+            source.connect(wave);
+            wave.connect(processor);
             processor.connect(audioContext.destination);
 
             processor.onaudioprocess = (e) => {
@@ -55,40 +1382,205 @@
                 }
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(pcmData.buffer);
+                    packetCount++;
+                    document.getElementById('wsPackets').textContent = packetCount;
                 }
             };
-
-            socket.onmessage = async (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'transcript') chatBox.innerText = "તમે: " + data.text;
-                if (data.type === 'ai_reply') {
-                    chatBox.innerText = "AI: " + data.text;
-                    const audio = new Audio("data:audio/wav;base64," + data.audio);
-                    audio.play();
-                }
-            };
-
-            status.innerText = "સાંભળી રહ્યો છું...";
-            micBtn.classList.replace('bg-blue-600', 'bg-red-600');
         }
 
-        micBtn.onclick = async () => {
-            // 1. Ensure AudioContext is initialized and resumed
-            if (!audioContext) {
-                audioContext = new AudioContext({ sampleRate: 16000 });
-            }
-            if (audioContext.state === 'suspended') {
-                await audioContext.resume();
-            }
-        
-            // 2. Manage WebSocket connection
+        function stopMic() {
+            isListening = false;
+            micBtn.classList.remove('listening');
+            micRingWrap.classList.remove('is-listening');
+            setStatus('Disconnected', false);
+            if (animFrame) cancelAnimationFrame(animFrame);
+            drawIdleWave();
+            stopTimer();
+        }
+
+        async function toggleMic() {
+            if (!audioContext) audioContext = new AudioContext({ sampleRate: settings.sampleRate });
+            if (audioContext.state === 'suspended') await audioContext.resume();
+
             if (!socket || socket.readyState !== WebSocket.OPEN) {
-                startStreaming();
+                await startStreaming();
+                isListening = true;
+                micBtn.classList.add('listening');
+                micRingWrap.classList.add('is-listening');
+                setStatus('સાંભળી રહ્યો છું...', true);
+                startTimer();
+                playSfx('start');
+                addMessage('user', '[🎙 Listening started]');
             } else {
-                // Stop and reset for next turn
-                window.location.reload();
+                socket.close();
+                stopMic();
+                playSfx('stop');
             }
-        };
+        }
+
+        // ── Helpers ────────────────────────────────────────────────────────────
+        function setConn(online) {
+            connDot.className = 'status-dot' + (online ? ' live' : '');
+            connLabel.textContent = online ? 'Connected' : 'Disconnected';
+            document.getElementById('statStatus').textContent = online ? 'Live' : 'Idle';
+        }
+
+        function setStatus(text, active) {
+            stateLabel.textContent = text;
+            stateLabel.className = 'state-label' + (active ? ' active' : '');
+        }
+
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `msg ${role}`;
+            const t = new Date().toLocaleTimeString('gu-IN', { hour: '2-digit', minute: '2-digit' });
+            div.innerHTML = `<div>${text}</div><div class="msg-meta">${role === 'ai' ? 'SamaySetu AI' : 'You'} · ${t}</div>`;
+            chatBody.appendChild(div);
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+
+        function clearChat() {
+            chatBody.innerHTML = '';
+            msgCount = 0;
+            document.getElementById('statMsgs').textContent = 0;
+        }
+
+        function detectToolFromText(text) {
+            const tools = ['book_appointment', 'check_calendar_availability', 'cancel_appointment', 'reschedule_appointment', 'suggest_next_available_slot'];
+            tools.forEach(t => {
+                if (text.toLowerCase().includes(t.replace(/_/g, ' '))) logTool(t, 'ok');
+            });
+        }
+
+        function logTool(name, status = 'ok') {
+            if (!document.getElementById('toolLogging').checked) return;
+            toolCount++;
+            document.getElementById('statTools').textContent = toolCount;
+            const ts = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            line.innerHTML = `<span class="ts">${ts}</span><span class="tool">${name}</span><span class="result ${status}">→ ${status}</span>`;
+            if (toolLogEl.firstChild && toolLogEl.firstChild.textContent.includes('awaiting')) toolLogEl.innerHTML = '';
+            toolLogEl.appendChild(line);
+            toolLogEl.scrollTop = toolLogEl.scrollHeight;
+        }
+
+        function logAppointment(text) {
+            const el = document.getElementById('apptList');
+            if (el.children[0] && el.children[0].style && !el.children[0].classList.contains('appt-item')) {
+                el.innerHTML = '';
+            }
+            const now = new Date();
+            const div = document.createElement('div');
+            div.className = 'appt-item';
+            div.innerHTML = `
+        <div class="time">${now.toLocaleDateString()} ${now.toLocaleTimeString()}</div>
+        <div class="name">New Appointment</div>
+        <span class="tag">Booked</span>`;
+            el.prepend(div);
+            logTool('book_appointment', 'ok');
+        }
+
+        function b64ToBlob(b64, mime) {
+            const bytes = atob(b64);
+            const arr = new Uint8Array(bytes.length);
+            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+            return new Blob([arr], { type: mime });
+        }
+
+        function showToast(msg, type = '') {
+            const t = document.createElement('div');
+            t.className = `toast ${type}`;
+            t.textContent = msg;
+            document.getElementById('toastContainer').appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        }
+
+        function playSfx(type) {
+            if (!document.getElementById('sfxEnabled').checked) return;
+            try {
+                const ac = new AudioContext();
+                const o = ac.createOscillator();
+                const g = ac.createGain();
+                o.connect(g); g.connect(ac.destination);
+                if (type === 'start') { o.frequency.value = 880; g.gain.setValueAtTime(0.1, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.2); }
+                else { o.frequency.value = 440; g.gain.setValueAtTime(0.08, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.25); }
+                o.start(); o.stop(ac.currentTime + 0.3);
+            } catch (e) { }
+        }
+
+        // Timer
+        function startTimer() {
+            sessionStart = Date.now();
+            durTimer = setInterval(() => {
+                const s = Math.floor((Date.now() - sessionStart) / 1000);
+                document.getElementById('statDur').textContent =
+                    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+            }, 1000);
+        }
+        function stopTimer() {
+            if (durTimer) { clearInterval(durTimer); durTimer = null; }
+        }
+
+        // ── Settings modal ─────────────────────────────────────────────────────
+        function openModal(id) { document.getElementById(id).classList.add('open'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+        function saveSettings() {
+            settings.lang = document.getElementById('sttLang').value;
+            settings.speaker = document.getElementById('ttsSpeaker').value;
+            settings.sampleRate = parseInt(document.getElementById('sampleRate').value);
+            settings.maxHistory = parseInt(document.getElementById('maxHistory').value);
+            document.getElementById('sideLang').value = settings.lang;
+            document.getElementById('sideSpeak').value = settings.speaker;
+            closeModal('settingsModal');
+            showToast('Settings saved ✓', 'success');
+        }
+
+        function syncLang(el) { settings.lang = el.value; document.getElementById('sttLang').value = el.value; }
+        function syncSpeaker(el) { settings.speaker = el.value; document.getElementById('ttsSpeaker').value = el.value; }
+
+        document.getElementById('volumeSlider').oninput = function () { settings.volume = parseFloat(this.value); };
+        document.getElementById('speedSlider').oninput = function () { settings.speed = parseFloat(this.value); };
+
+        // ── Export ─────────────────────────────────────────────────────────────
+        function exportLog() {
+            const lines = [];
+            chatBody.querySelectorAll('.msg').forEach(m => {
+                const meta = m.querySelector('.msg-meta')?.textContent || '';
+                const txt = m.querySelector('div')?.textContent || '';
+                lines.push(`[${meta}] ${txt}`);
+            });
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `samaysetu_log_${Date.now()}.txt`;
+            a.click();
+        }
+
+        function resetSession() {
+            if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+            stopMic();
+            clearChat();
+            toolLogEl.innerHTML = '<div style="color:var(--border);">— awaiting tool calls —</div>';
+            document.getElementById('apptList').innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments this session.</div>';
+            toolCount = 0; packetCount = 0; msgCount = 0;
+            document.getElementById('statTools').textContent = 0;
+            document.getElementById('statMsgs').textContent = 0;
+            document.getElementById('wsPackets').textContent = 0;
+            document.getElementById('statSession').textContent = '—';
+            document.getElementById('statDur').textContent = '0:00';
+            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
+            transcriptBox.classList.add('empty');
+            showToast('Session reset', 'success');
+            addMessage('ai', 'નમસ્તે! નવો સત્ર શરૂ. હું ફરી મદદ કરવા તૈયાર છું!');
+        }
+
+        // ── Init ───────────────────────────────────────────────────────────────
+        buildQuickSlots();
+        drawIdleWave();
+        document.getElementById('bizStart').onchange = buildQuickSlots;
+        document.getElementById('bizEnd').onchange = buildQuickSlots;
     </script>
 </body>
 
