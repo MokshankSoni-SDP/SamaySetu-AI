@@ -47,7 +47,6 @@
             overflow-x: hidden;
         }
 
-        /* ── Noise grain overlay ── */
         body::before {
             content: '';
             position: fixed;
@@ -57,7 +56,6 @@
             z-index: 0;
         }
 
-        /* ── Ambient gradient blobs ── */
         .blob {
             position: fixed;
             border-radius: 50%;
@@ -105,7 +103,6 @@
             }
         }
 
-        /* ── Layout ── */
         .app {
             position: relative;
             z-index: 1;
@@ -116,7 +113,6 @@
             min-height: 100vh;
         }
 
-        /* ── Header ── */
         header {
             grid-column: 1 / -1;
             display: flex;
@@ -197,7 +193,6 @@
             }
         }
 
-        /* ── Sidebar panels ── */
         .sidebar {
             background: var(--surface);
             border-right: 1px solid var(--border);
@@ -221,7 +216,6 @@
             margin-bottom: 12px;
         }
 
-        /* Config cards */
         .config-card {
             background: var(--panel);
             border: 1px solid var(--border);
@@ -238,7 +232,6 @@
         }
 
         .config-card select,
-        .config-card input[type="range"],
         .config-card input[type="number"],
         .config-card input[type="text"] {
             width: 100%;
@@ -263,28 +256,24 @@
             background: var(--bg);
         }
 
-        .range-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        .hours-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
         }
 
-        .range-row input[type="range"] {
-            flex: 1;
-            padding: 0;
-            cursor: pointer;
-            accent-color: var(--accent);
+        .hours-grid label {
+            font-size: 11px;
+            color: var(--muted);
+            display: block;
+            margin-bottom: 4px;
         }
 
-        .range-val {
-            font-size: 13px;
-            color: var(--accent);
-            font-family: var(--font-mono);
-            min-width: 32px;
-            text-align: right;
+        .hours-grid input[type="number"] {
+            padding: 6px 8px;
+            font-size: 12px;
         }
 
-        /* Toggle switch */
         .toggle-row {
             display: flex;
             align-items: center;
@@ -335,52 +324,6 @@
             background: var(--accent);
         }
 
-        /* Business hours grid */
-        .hours-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-
-        .hours-grid label {
-            font-size: 11px;
-            color: var(--muted);
-            display: block;
-            margin-bottom: 4px;
-        }
-
-        .hours-grid input[type="number"] {
-            padding: 6px 8px;
-            font-size: 12px;
-        }
-
-        /* Quick book buttons */
-        .quick-slots {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-        }
-
-        .slot-btn {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text);
-            font-size: 11px;
-            padding: 7px 4px;
-            cursor: pointer;
-            font-family: var(--font-body);
-            text-align: center;
-            transition: all 0.2s;
-        }
-
-        .slot-btn:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-            background: var(--glow);
-        }
-
-        /* ── Center stage ── */
         .main-stage {
             display: flex;
             flex-direction: column;
@@ -390,7 +333,6 @@
             gap: 32px;
         }
 
-        /* Visualizer ring */
         .mic-ring-wrap {
             position: relative;
             display: grid;
@@ -449,7 +391,6 @@
             }
         }
 
-        /* Mic button */
         .mic-btn {
             position: relative;
             z-index: 2;
@@ -476,7 +417,6 @@
 
         .mic-btn.listening {
             background: linear-gradient(135deg, #ef4444, #b91c1c);
-            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3);
             animation: mic-pulse 1.2s ease-in-out infinite;
         }
 
@@ -498,7 +438,30 @@
             color: #0a0c10;
         }
 
-        /* Waveform canvas */
+        /* ── COMMIT INDICATOR — shown when silence detected, about to send ── */
+        .commit-bar {
+            width: 100%;
+            max-width: 480px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .commit-bar.active {
+            opacity: 1;
+        }
+
+        .commit-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            border-radius: 4px;
+            transition: width 0.1s linear;
+        }
+
         #waveCanvas {
             width: 100%;
             max-width: 480px;
@@ -509,7 +472,6 @@
             display: block;
         }
 
-        /* State label */
         .state-label {
             font-size: 13px;
             color: var(--muted);
@@ -523,7 +485,6 @@
             color: var(--accent);
         }
 
-        /* Chat feed */
         .chat-feed {
             width: 100%;
             max-width: 560px;
@@ -620,7 +581,6 @@
             font-family: var(--font-mono);
         }
 
-        /* Transcript ticker */
         .transcript-box {
             width: 100%;
             max-width: 560px;
@@ -640,7 +600,6 @@
             font-size: 13px;
         }
 
-        /* ── Right sidebar — Session & Logs ── */
         .session-card {
             background: var(--panel);
             border: 1px solid var(--border);
@@ -668,7 +627,6 @@
             font-size: 12px;
         }
 
-        /* Tool log */
         .tool-log {
             background: var(--bg);
             border: 1px solid var(--border);
@@ -714,7 +672,6 @@
             color: var(--danger);
         }
 
-        /* Upcoming appointments */
         .appt-list {
             display: flex;
             flex-direction: column;
@@ -750,7 +707,6 @@
             letter-spacing: 0.05em;
         }
 
-        /* ── Footer ── */
         footer {
             grid-column: 1 / -1;
             border-top: 1px solid var(--border);
@@ -791,7 +747,6 @@
             color: var(--danger);
         }
 
-        /* ── Notification toast ── */
         .toast-container {
             position: fixed;
             bottom: 60px;
@@ -837,7 +792,6 @@
             }
         }
 
-        /* ── Modal overlay ── */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -914,7 +868,6 @@
             color: var(--text);
         }
 
-        /* Responsive */
         @media (max-width: 900px) {
             .app {
                 grid-template-columns: 1fr;
@@ -940,7 +893,6 @@
     <div class="blob blob-2"></div>
     <div class="blob blob-3"></div>
 
-    <!-- Toast container -->
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- Settings Modal -->
@@ -970,9 +922,9 @@
                     </select>
                 </div>
                 <div>
-                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Session Memory
-                        (turns)</label>
-                    <input type="number" id="maxHistory" min="2" max="20" value="5"
+                    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Silence Timeout
+                        (ms)</label>
+                    <input type="number" id="silenceTimeout" min="500" max="4000" value="1500"
                         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;" />
                 </div>
                 <div>
@@ -994,7 +946,6 @@
     </div>
 
     <div class="app">
-        <!-- Header -->
         <header>
             <div class="logo">
                 <div class="logo-mark">સ</div>
@@ -1009,7 +960,7 @@
             </div>
         </header>
 
-        <!-- Left Sidebar — Configuration -->
+        <!-- Left Sidebar -->
         <aside class="sidebar">
             <div>
                 <div class="panel-title">Voice Configuration</div>
@@ -1022,36 +973,6 @@
                     </select>
                 </div>
             </div>
-
-            <!-- <div>
-                <div class="panel-title">Output Voice</div>
-                <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
-                    <div>
-                        <label>TTS Speaker</label>
-                        <select id="sideSpeak" onchange="syncSpeaker(this)">
-                            <option value="simran" selected>Simran (Female)</option>
-                            <option value="meera">Meera (Female)</option>
-                            <option value="arjun">Arjun (Male)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Playback Volume</label>
-                        <div class="range-row">
-                            <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1"
-                                oninput="document.getElementById('volVal').textContent=Math.round(this.value*100)+'%'">
-                            <span class="range-val" id="volVal">100%</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label>Playback Speed</label>
-                        <div class="range-row">
-                            <input type="range" id="speedSlider" min="0.5" max="2" step="0.1" value="1"
-                                oninput="document.getElementById('speedVal').textContent=this.value+'x'">
-                            <span class="range-val" id="speedVal">1x</span>
-                        </div>
-                    </div>
-                </div>
-            </div> -->
 
             <div>
                 <div class="panel-title">Business Hours</div>
@@ -1080,13 +1001,25 @@
             </div>
 
             <div>
-                <div class="panel-title">Behavior</div>
+                <div class="panel-title">Silence Detection</div>
                 <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <label>Commit after silence (ms)</label>
+                        <input type="number" id="sidesilenceTimeout" min="500" max="4000" value="1500"
+                            style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;"
+                            oninput="settings.silenceTimeout=parseInt(this.value)" />
+                    </div>
                     <div class="toggle-row">
-                        <span>Auto-listen after reply</span>
-                        <label class="toggle"><input type="checkbox" id="autoListen"><span
+                        <span>Show commit bar</span>
+                        <label class="toggle"><input type="checkbox" id="showCommitBar" checked><span
                                 class="toggle-slider"></span></label>
                     </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel-title">Behavior</div>
+                <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
                     <div class="toggle-row">
                         <span>Show raw transcript</span>
                         <label class="toggle"><input type="checkbox" id="showTranscript" checked><span
@@ -1104,16 +1037,10 @@
                     </div>
                 </div>
             </div>
-
-            <!-- <div>
-                <div class="panel-title">Quick Slots (Today)</div>
-                <div class="quick-slots" id="quickSlots"></div>
-            </div> -->
         </aside>
 
         <!-- Main Stage -->
         <main class="main-stage">
-            <!-- Mic with rings -->
             <div class="mic-ring-wrap" id="micRingWrap">
                 <div class="ring ring-1"></div>
                 <div class="ring ring-2"></div>
@@ -1121,23 +1048,24 @@
                 <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Click to speak">
                     <svg id="micIcon" viewBox="0 0 24 24" fill="currentColor">
                         <path
-                            d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 005 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
+                            d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 015 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
                     </svg>
                 </button>
             </div>
 
-            <!-- State label -->
             <div class="state-label" id="stateLabel">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
 
-            <!-- Live transcript -->
+            <!-- Commit progress bar (silence countdown) -->
+            <div class="commit-bar" id="commitBar">
+                <div class="commit-bar-fill" id="commitBarFill"></div>
+            </div>
+
             <div class="transcript-box empty" id="transcriptBox">
                 તમારો અવાજ અહીં દેખાશે...
             </div>
 
-            <!-- Waveform -->
             <canvas id="waveCanvas" width="560" height="60"></canvas>
 
-            <!-- Chat feed -->
             <div class="chat-feed">
                 <div class="chat-header">
                     <span>Conversation History</span>
@@ -1152,7 +1080,7 @@
             </div>
         </main>
 
-        <!-- Right Sidebar — Session & Logs -->
+        <!-- Right Sidebar -->
         <aside class="sidebar right">
             <div>
                 <div class="panel-title">Session Info</div>
@@ -1162,6 +1090,7 @@
                     <div class="stat-row"><span class="k">Messages</span><span class="v" id="statMsgs">0</span></div>
                     <div class="stat-row"><span class="k">Tool Calls</span><span class="v" id="statTools">0</span></div>
                     <div class="stat-row"><span class="k">Duration</span><span class="v" id="statDur">0:00</span></div>
+                    <div class="stat-row"><span class="k">Commits</span><span class="v" id="statCommits">0</span></div>
                     <div class="stat-row"><span class="k">Status</span><span class="v" id="statStatus">Idle</span></div>
                 </div>
             </div>
@@ -1187,10 +1116,6 @@
                         <span class="k" style="font-size:12px;">WS Endpoint</span>
                         <span class="v" style="font-size:10px;" id="wsEndpoint">/ws/voice</span>
                     </div>
-                    <!-- <div class="stat-row">
-                        <span class="k" style="font-size:12px;">Ping</span>
-                        <span class="v" id="wsPing">—</span>
-                    </div> -->
                     <div class="stat-row">
                         <span class="k" style="font-size:12px;">Packets sent</span>
                         <span class="v" id="wsPackets">0</span>
@@ -1199,7 +1124,6 @@
             </div>
         </aside>
 
-        <!-- Footer -->
         <footer>
             <div>© 2025 SamaySetu AI &nbsp;·&nbsp; Powered by Sarvam + Groq + Google Calendar</div>
             <div class="footer-actions">
@@ -1211,23 +1135,41 @@
     </div>
 
     <script>
-        // ── State ──────────────────────────────────────────────────────────────
+        // ── Debug logger ──────────────────────────────────────────────────────
+        function dbg(step, msg) {
+            const ts = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+            console.log(`[${ts}] ${step}: ${msg}`);
+        }
+
+        // ── State ─────────────────────────────────────────────────────────────
         let socket, audioContext, processor, analyser, animFrame;
         let isListening = false;
+        let aiSpeaking = false;
         let sessionStart = null;
         let durTimer = null;
-        let msgCount = 0, toolCount = 0, packetCount = 0;
+        let msgCount = 0, toolCount = 0, packetCount = 0, commitCount = 0;
         let currentAudio = null;
+        let _droppedAI = 0, _droppedVAD = 0, _sentToServer = 0;
+
+        // ── SILENCE COMMIT STATE ──────────────────────────────────────────────
+        // These variables implement client-side "end of utterance" detection.
+        // Since Sarvam's saaras:v3 streaming rarely emits is_final=true from
+        // a browser WebSocket context (unlike the Python client), we detect
+        // silence ourselves and force-commit the last partial transcript.
+        let lastPartialTranscript = '';   // most recent partial text from Sarvam
+        let silenceTimer = null;          // setTimeout handle for commit trigger
+        let speechDetected = false;       // true once we've seen non-silent audio
+        let commitBarAnimFrame = null;    // rAF handle for the commit bar animation
+        let commitBarStart = null;        // timestamp when silence timer started
 
         const settings = {
-            lang: 'gu-IN', speaker: 'simran', volume: 1, speed: 1,
-            sampleRate: 16000, maxHistory: 5,
-            autoListen: false, showTranscript: true, toolLogging: true, sfx: true
+            lang: 'gu-IN',
+            speaker: 'simran',
+            sampleRate: 16000,
+            silenceTimeout: 1500,   // ms of silence before committing partial transcript
         };
 
-        const appointmentLog = [];
-
-        // ── DOM refs ───────────────────────────────────────────────────────────
+        // ── DOM refs ──────────────────────────────────────────────────────────
         const micBtn = document.getElementById('micBtn');
         const micRingWrap = document.getElementById('micRingWrap');
         const stateLabel = document.getElementById('stateLabel');
@@ -1238,30 +1180,98 @@
         const toolLogEl = document.getElementById('toolLog');
         const canvas = document.getElementById('waveCanvas');
         const ctx2d = canvas.getContext('2d');
+        const commitBar = document.getElementById('commitBar');
+        const commitBarFill = document.getElementById('commitBarFill');
 
-        // ── Quick slots ────────────────────────────────────────────────────────
-        function buildQuickSlots() {
-            const now = new Date();
-            const slots = [];
-            const start = parseInt(document.getElementById('bizStart').value);
-            const end = parseInt(document.getElementById('bizEnd').value);
-            for (let h = start; h < end; h += 2) {
-                slots.push(`${String(h).padStart(2, '0')}:00`);
-                if (slots.length >= 6) break;
+        // ── Silence commit helpers ─────────────────────────────────────────────
+        /**
+         * Called whenever we receive a non-empty partial transcript from Sarvam.
+         * Resets the silence timer so we only commit after the user has truly stopped.
+         */
+        function onPartialTranscript(text) {
+            lastPartialTranscript = text;
+            speechDetected = true;
+            resetSilenceTimer();
+        }
+
+        /**
+         * Called when Sarvam sends is_final=true. This is the ideal path —
+         * immediately commit without waiting for silence timeout.
+         */
+        function onFinalTranscript(text) {
+            lastPartialTranscript = text;
+            cancelSilenceTimer();
+            commitTranscript(text, 'sarvam_final');
+        }
+
+        /**
+         * Arms (or re-arms) the silence timer. When the timer fires, it means
+         * the user has been silent for `settings.silenceTimeout` ms after speaking,
+         * so we treat the last partial as a completed utterance.
+         */
+        function resetSilenceTimer() {
+            cancelSilenceTimer();
+            if (!lastPartialTranscript) return;
+
+            commitBarStart = Date.now();
+            if (document.getElementById('showCommitBar').checked) {
+                commitBar.classList.add('active');
+                animateCommitBar();
             }
-            const container = document.getElementById('quickSlots');
-            container.innerHTML = slots.map(t =>
-                `<button class="slot-btn" onclick="suggestSlotQuery('${t}')">${t}</button>`
-            ).join('');
+
+            silenceTimer = setTimeout(() => {
+                if (lastPartialTranscript) {
+                    dbg('[SILENCE]', `Silence timeout fired (${settings.silenceTimeout}ms) — committing: '${lastPartialTranscript}'`);
+                    commitTranscript(lastPartialTranscript, 'silence_timeout');
+                }
+            }, settings.silenceTimeout);
         }
 
-        function suggestSlotQuery(time) {
-            const msg = `${time} વાગ્યે appointment ઉપલબ્ધ છે?`;
-            addMessage('user', msg);
-            showToast(`"${msg}" — spoken to AI`);
+        function cancelSilenceTimer() {
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            commitBar.classList.remove('active');
+            commitBarFill.style.width = '0%';
+            if (commitBarAnimFrame) { cancelAnimationFrame(commitBarAnimFrame); commitBarAnimFrame = null; }
+            commitBarStart = null;
         }
 
-        // ── Waveform ───────────────────────────────────────────────────────────
+        function animateCommitBar() {
+            commitBarAnimFrame = requestAnimationFrame(() => {
+                if (!commitBarStart) return;
+                const elapsed = Date.now() - commitBarStart;
+                const pct = Math.min(100, (elapsed / settings.silenceTimeout) * 100);
+                commitBarFill.style.width = pct + '%';
+                if (pct < 100) animateCommitBar();
+            });
+        }
+
+        /**
+         * The single commit point. Sends the transcript to chat and notifies
+         * the backend as though it were a final transcript.
+         */
+        function commitTranscript(text, source) {
+            if (!text || !text.trim()) return;
+            lastPartialTranscript = '';
+            speechDetected = false;
+            cancelSilenceTimer();
+
+            commitCount++;
+            document.getElementById('statCommits').textContent = commitCount;
+            dbg('[COMMIT]', `Committing transcript (source=${source}): '${text}'`);
+
+            // Update UI
+            addMessage('user', text);
+            msgCount++;
+            document.getElementById('statMsgs').textContent = msgCount;
+
+            // Notify backend that this is a final (committed) transcript
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'commit_transcript', text: text }));
+                dbg('[COMMIT]', `Sent commit_transcript to backend`);
+            }
+        }
+
+        // ── Waveform ──────────────────────────────────────────────────────────
         function drawWave(data) {
             const W = canvas.width, H = canvas.height;
             ctx2d.clearRect(0, 0, W, H);
@@ -1307,25 +1317,49 @@
 
         // ── WebSocket & Mic ───────────────────────────────────────────────────
         async function startStreaming() {
+            dbg('[STEP 0] WS', `Opening WebSocket to ws://${window.location.host}/ws/voice`);
             socket = new WebSocket(`ws://${window.location.host}/ws/voice`);
             socket.binaryType = 'arraybuffer';
             document.getElementById('wsEndpoint').textContent = `/ws/voice`;
             document.getElementById('statSession').textContent = `ses_${Date.now().toString(36)}`;
 
-            socket.onopen = () => setConn(true);
-            socket.onclose = () => { setConn(false); stopMic(); };
-            socket.onerror = () => showToast('WebSocket error', 'error');
+            socket.onopen = () => { dbg('[STEP 0] WS', 'WebSocket CONNECTED'); setConn(true); };
+            socket.onclose = (ev) => { dbg('[STEP 0] WS', `WebSocket CLOSED — code=${ev.code}`); setConn(false); stopMic(); };
+            socket.onerror = () => { showToast('WebSocket error', 'error'); };
 
             socket.onmessage = async (event) => {
-                const data = JSON.parse(event.data);
+                let data;
+                try { data = JSON.parse(event.data); } catch { return; }
+                dbg('[STEP 0] WS', `Message received | type='${data.type}'`);
 
+                // ── Partial / final transcript from Sarvam (via backend) ──────
                 if (data.type === 'transcript') {
-                    if (settings.showTranscript) {
+                    const text = data.text || '';
+                    dbg('[STEP 4] TRANSCRIPT', `is_final=${data.is_final} | text='${text}'`);
+
+                    if (document.getElementById('showTranscript').checked) {
                         transcriptBox.classList.remove('empty');
-                        transcriptBox.textContent = data.text;
+                        transcriptBox.textContent = text;
+                        transcriptBox.style.opacity = data.is_final ? '1' : '0.7';
                     }
-                    // Detect tool calls from transcript keywords
-                    detectToolFromText(data.text);
+
+                    if (data.is_final) {
+                        // ── Ideal path: Sarvam gave us a final transcript ─────
+                        onFinalTranscript(text);
+                    } else {
+                        // ── Partial: arm the silence commit timer ─────────────
+                        onPartialTranscript(text);
+                    }
+                }
+
+                if (data.type === 'processing_start') {
+                    setStatus('AI વિચારી રહ્યો છે...', true);
+                }
+
+                if (data.type === 'tool_call') {
+                    const st = data.status === 'running' ? 'running' : data.status === 'ok' ? 'ok' : 'err';
+                    logTool(data.name, st, data.observation || '');
+                    if (data.status === 'ok' && data.name === 'book_appointment') logAppointment();
                 }
 
                 if (data.type === 'ai_reply') {
@@ -1334,38 +1368,45 @@
                     msgCount++;
                     document.getElementById('statMsgs').textContent = msgCount;
 
-                    // Detect booked appointments
-                    if (/SUCCESS.*Appointment booked/i.test(data.text) || /એપોઇન્ટ.*બુક/i.test(data.text)) {
-                        logAppointment(data.text);
-                    }
-
                     if (data.audio) {
                         const blob = b64ToBlob(data.audio, 'audio/wav');
                         const url = URL.createObjectURL(blob);
                         if (currentAudio) { currentAudio.pause(); currentAudio = null; }
                         currentAudio = new Audio(url);
-                        currentAudio.volume = settings.volume;
-                        currentAudio.playbackRate = settings.speed;
-                        currentAudio.play();
-                        currentAudio.onended = () => {
-                            setStatus('Ready', false);
-                            if (settings.autoListen && document.getElementById('autoListen').checked) {
-                                setTimeout(toggleMic, 500);
-                            }
+
+                        currentAudio.onplay = () => {
+                            aiSpeaking = true;
+                            setMicMuteUI(true);
+                            if (socket.readyState === WebSocket.OPEN)
+                                socket.send(JSON.stringify({ type: 'ai_speaking_start' }));
                         };
+                        currentAudio.onended = () => {
+                            aiSpeaking = false;
+                            setMicMuteUI(false);
+                            if (socket.readyState === WebSocket.OPEN)
+                                socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
+                            setStatus('સાંભળી રહ્યો છું...', true);
+                            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
+                            transcriptBox.classList.add('empty');
+                        };
+                        currentAudio.onerror = (e) => { dbg('[AUDIO]', `Playback error: ${e.target.error?.message}`); };
+                        currentAudio.play().catch(e => dbg('[AUDIO]', `play() rejected: ${e}`));
                     } else {
                         setStatus('Ready', false);
                     }
                 }
-
-                // Ping measurement
-                if (data.type === 'pong') {
-                    document.getElementById('wsPing').textContent =
-                        (Date.now() - data._sent) + 'ms';
-                }
             };
 
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            dbg('[STEP 1] MIC', 'Requesting microphone access');
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                dbg('[STEP 1] MIC', 'Microphone GRANTED');
+            } catch (err) {
+                dbg('[STEP 1] MIC', `Microphone DENIED: ${err}`);
+                throw err;
+            }
+
             audioContext = new AudioContext({ sampleRate: settings.sampleRate });
             const source = audioContext.createMediaStreamSource(stream);
             const wave = startWaveform();
@@ -1374,24 +1415,56 @@
             wave.connect(processor);
             processor.connect(audioContext.destination);
 
+            _droppedAI = 0; _droppedVAD = 0; _sentToServer = 0;
+
             processor.onaudioprocess = (e) => {
+                if (aiSpeaking) { _droppedAI++; return; }
+
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
                     pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
                 }
+
+                const rms = Math.sqrt(pcmData.reduce((s, v) => s + v * v, 0) / pcmData.length);
+
+                // ── Client-side silence detection for commit timer ─────────────
+                // If the user was speaking but is now silent, the silence timer
+                // will fire and commit whatever partial transcript we have.
+                if (rms < 300) {
+                    _droppedVAD++;
+                    if (_droppedVAD % 50 === 1)
+                        dbg('[STEP 2] VAD', `Silence (rms=${rms.toFixed(1)}) | droppedVAD=${_droppedVAD}`);
+                    // Note: we do NOT return here if speechDetected — we still
+                    // need to feed Sarvam some audio so it doesn't disconnect,
+                    // but we skip non-speech to save bandwidth.
+                    return;
+                }
+
+                // Speech detected — send to backend/Sarvam
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(pcmData.buffer);
                     packetCount++;
+                    _sentToServer++;
                     document.getElementById('wsPackets').textContent = packetCount;
+                    if (_sentToServer % 50 === 1)
+                        dbg('[STEP 3] SEND', `pkt#=${_sentToServer} rms=${rms.toFixed(1)}`);
                 }
             };
+        }
+
+        function setMicMuteUI(muted) {
+            micRingWrap.style.opacity = muted ? '0.3' : '1';
+            micBtn.style.cursor = muted ? 'not-allowed' : 'pointer';
+            stateLabel.textContent = muted ? 'AI બોલી રહ્યો છે...' : 'સાંભળી રહ્યો છું...';
+            stateLabel.className = 'state-label active';
         }
 
         function stopMic() {
             isListening = false;
             micBtn.classList.remove('listening');
             micRingWrap.classList.remove('is-listening');
+            cancelSilenceTimer();
             setStatus('Disconnected', false);
             if (animFrame) cancelAnimationFrame(animFrame);
             drawIdleWave();
@@ -1410,7 +1483,6 @@
                 setStatus('સાંભળી રહ્યો છું...', true);
                 startTimer();
                 playSfx('start');
-                addMessage('user', '[🎙 Listening started]');
             } else {
                 socket.close();
                 stopMic();
@@ -1418,7 +1490,7 @@
             }
         }
 
-        // ── Helpers ────────────────────────────────────────────────────────────
+        // ── Helpers ───────────────────────────────────────────────────────────
         function setConn(online) {
             connDot.className = 'status-dot' + (online ? ' live' : '');
             connLabel.textContent = online ? 'Connected' : 'Disconnected';
@@ -1445,40 +1517,28 @@
             document.getElementById('statMsgs').textContent = 0;
         }
 
-        function detectToolFromText(text) {
-            const tools = ['book_appointment', 'check_calendar_availability', 'cancel_appointment', 'reschedule_appointment', 'suggest_next_available_slot'];
-            tools.forEach(t => {
-                if (text.toLowerCase().includes(t.replace(/_/g, ' '))) logTool(t, 'ok');
-            });
-        }
-
-        function logTool(name, status = 'ok') {
+        function logTool(name, status = 'ok', observation = '') {
             if (!document.getElementById('toolLogging').checked) return;
-            toolCount++;
-            document.getElementById('statTools').textContent = toolCount;
+            if (status !== 'running') { toolCount++; document.getElementById('statTools').textContent = toolCount; }
             const ts = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const line = document.createElement('div');
             line.className = 'log-line';
-            line.innerHTML = `<span class="ts">${ts}</span><span class="tool">${name}</span><span class="result ${status}">→ ${status}</span>`;
+            const statusLabel = status === 'running' ? '⏳ running' : status === 'ok' ? '✓ ok' : '✗ err';
+            const obsSnippet = observation ? ' · ' + observation.slice(0, 40) : '';
+            line.innerHTML = `<span class="ts">${ts}</span><span class="tool">${name}</span><span class="result ${status === 'running' ? '' : status}">${statusLabel}${obsSnippet}</span>`;
             if (toolLogEl.firstChild && toolLogEl.firstChild.textContent.includes('awaiting')) toolLogEl.innerHTML = '';
             toolLogEl.appendChild(line);
             toolLogEl.scrollTop = toolLogEl.scrollHeight;
         }
 
-        function logAppointment(text) {
+        function logAppointment() {
             const el = document.getElementById('apptList');
-            if (el.children[0] && el.children[0].style && !el.children[0].classList.contains('appt-item')) {
-                el.innerHTML = '';
-            }
+            if (el.children[0] && !el.children[0].classList.contains('appt-item')) el.innerHTML = '';
             const now = new Date();
             const div = document.createElement('div');
             div.className = 'appt-item';
-            div.innerHTML = `
-        <div class="time">${now.toLocaleDateString()} ${now.toLocaleTimeString()}</div>
-        <div class="name">New Appointment</div>
-        <span class="tag">Booked</span>`;
+            div.innerHTML = `<div class="time">${now.toLocaleDateString()} ${now.toLocaleTimeString()}</div><div class="name">New Appointment</div><span class="tag">Booked</span>`;
             el.prepend(div);
-            logTool('book_appointment', 'ok');
         }
 
         function b64ToBlob(b64, mime) {
@@ -1509,20 +1569,15 @@
             } catch (e) { }
         }
 
-        // Timer
         function startTimer() {
             sessionStart = Date.now();
             durTimer = setInterval(() => {
                 const s = Math.floor((Date.now() - sessionStart) / 1000);
-                document.getElementById('statDur').textContent =
-                    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+                document.getElementById('statDur').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
             }, 1000);
         }
-        function stopTimer() {
-            if (durTimer) { clearInterval(durTimer); durTimer = null; }
-        }
+        function stopTimer() { if (durTimer) { clearInterval(durTimer); durTimer = null; } }
 
-        // ── Settings modal ─────────────────────────────────────────────────────
         function openModal(id) { document.getElementById(id).classList.add('open'); }
         function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -1530,20 +1585,18 @@
             settings.lang = document.getElementById('sttLang').value;
             settings.speaker = document.getElementById('ttsSpeaker').value;
             settings.sampleRate = parseInt(document.getElementById('sampleRate').value);
-            settings.maxHistory = parseInt(document.getElementById('maxHistory').value);
+            settings.silenceTimeout = parseInt(document.getElementById('silenceTimeout').value);
             document.getElementById('sideLang').value = settings.lang;
-            document.getElementById('sideSpeak').value = settings.speaker;
+            document.getElementById('sidesilenceTimeout').value = settings.silenceTimeout;
             closeModal('settingsModal');
             showToast('Settings saved ✓', 'success');
         }
 
-        function syncLang(el) { settings.lang = el.value; document.getElementById('sttLang').value = el.value; }
-        function syncSpeaker(el) { settings.speaker = el.value; document.getElementById('ttsSpeaker').value = el.value; }
+        function syncLang(el) {
+            settings.lang = el.value;
+            document.getElementById('sttLang').value = el.value;
+        }
 
-        document.getElementById('volumeSlider').oninput = function () { settings.volume = parseFloat(this.value); };
-        document.getElementById('speedSlider').oninput = function () { settings.speed = parseFloat(this.value); };
-
-        // ── Export ─────────────────────────────────────────────────────────────
         function exportLog() {
             const lines = [];
             chatBody.querySelectorAll('.msg').forEach(m => {
@@ -1564,23 +1617,21 @@
             clearChat();
             toolLogEl.innerHTML = '<div style="color:var(--border);">— awaiting tool calls —</div>';
             document.getElementById('apptList').innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments this session.</div>';
-            toolCount = 0; packetCount = 0; msgCount = 0;
+            toolCount = 0; packetCount = 0; msgCount = 0; commitCount = 0;
             document.getElementById('statTools').textContent = 0;
             document.getElementById('statMsgs').textContent = 0;
             document.getElementById('wsPackets').textContent = 0;
             document.getElementById('statSession').textContent = '—';
             document.getElementById('statDur').textContent = '0:00';
+            document.getElementById('statCommits').textContent = 0;
             transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
             transcriptBox.classList.add('empty');
             showToast('Session reset', 'success');
             addMessage('ai', 'નમસ્તે! નવો સત્ર શરૂ. હું ફરી મદદ કરવા તૈયાર છું!');
         }
 
-        // ── Init ───────────────────────────────────────────────────────────────
-        buildQuickSlots();
+        // ── Init ──────────────────────────────────────────────────────────────
         drawIdleWave();
-        document.getElementById('bizStart').onchange = buildQuickSlots;
-        document.getElementById('bizEnd').onchange = buildQuickSlots;
     </script>
 </body>
 
