@@ -67,6 +67,11 @@ async def run_tool_async(tool_name: str, args: dict):
     return await asyncio.to_thread(func, **args)
 
 # ── Brain ──────────────────────────────────────────────────────────────────────
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
+async def safe_llm_call(messages):
+    return await llm_with_tools.ainvoke(messages)
+
 async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     t0 = datetime.now()
     today = t0.strftime("%Y-%m-%d")
@@ -89,7 +94,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     log("[LLM]", f"ainvoke() start | {len(recent_history)} messages in context")
     try:
         # FIX 2 applied: ainvoke instead of invoke
-        ai_msg = await llm_with_tools.ainvoke(recent_history)
+        ai_msg = await safe_llm_call(recent_history)
         llm_ms = (datetime.now() - t_llm).total_seconds()
         log("[LLM]", f"Done in {llm_ms:.2f}s | tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
         print_token_usage(ai_msg, "Initial LLM")
@@ -135,7 +140,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         t_llm2 = datetime.now()
         log("[LLM]", f"Re-invoking after tool iteration #{tool_iteration}")
         try:
-            ai_msg = await llm_with_tools.ainvoke(recent_history)
+            ai_msg = await safe_llm_call(recent_history)
             llm2_ms = (datetime.now() - t_llm2).total_seconds()
             log("[LLM]", f"Post-tool done in {llm2_ms:.2f}s | tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
             print_token_usage(ai_msg, f"Post-Tool #{tool_iteration}")
