@@ -924,7 +924,7 @@
                 <div>
                     <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Silence Timeout
                         (ms)</label>
-                    <input type="number" id="silenceTimeout" min="500" max="4000" value="800"
+                    <input type="number" id="silenceTimeout" min="500" max="4000" value="1500"
                         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;" />
                 </div>
                 <div>
@@ -1005,7 +1005,7 @@
                 <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
                     <div>
                         <label>Commit after silence (ms)</label>
-                        <input type="number" id="sidesilenceTimeout" min="500" max="4000" value="800"
+                        <input type="number" id="sidesilenceTimeout" min="500" max="4000" value="1500"
                             style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;"
                             oninput="settings.silenceTimeout=parseInt(this.value)" />
                     </div>
@@ -1141,32 +1141,111 @@
             console.log(`[${ts}] ${step}: ${msg}`);
         }
 
-        // ── State ─────────────────────────────────────────────────────────────
+        // ── Core state ────────────────────────────────────────────────────────
         let socket, audioContext, processor, analyser, animFrame;
         let isListening = false;
-        let aiSpeaking = false;
-        let sessionStart = null;
-        let durTimer = null;
+        let sessionStart = null, durTimer = null;
         let msgCount = 0, toolCount = 0, packetCount = 0, commitCount = 0;
-        let currentAudio = null;
         let _droppedAI = 0, _droppedVAD = 0, _sentToServer = 0;
 
+        // ── Audio queue ───────────────────────────────────────────────────────
+        // Chunks arrive one at a time from the backend as each TTS call completes.
+        // We enqueue them and play sequentially so the user hears chunk 1 while
+        // chunk 2 is still being generated server-side.
+        let audioQueue = [];      // [{audio: b64, text: str, index: int}]
+        let queuePlaying = false;   // true while an Audio object is playing
+        let aiSpeaking = false;   // true while ANY chunk is playing (used to mute mic)
+        let currentAudio = null;    // the currently-playing Audio object
+
+        function enqueueChunk(b64, text, index) {
+            audioQueue.push({ audio: b64, text, index });
+            dbg('[QUEUE]', `Chunk ${index} enqueued | queue length=${audioQueue.length}`);
+            if (!queuePlaying) playNextChunk();
+        }
+
+        function playNextChunk() {
+            if (audioQueue.length === 0) {
+                // Queue empty — all chunks played
+                queuePlaying = false;
+                onAllChunksDone();
+                return;
+            }
+
+            queuePlaying = true;
+            const { audio, text, index } = audioQueue.shift();
+            dbg('[QUEUE]', `Playing chunk ${index} | queue remaining=${audioQueue.length}`);
+
+            const blob = b64ToBlob(audio, 'audio/wav');
+            const url = URL.createObjectURL(blob);
+            currentAudio = new Audio(url);
+
+            currentAudio.onplay = () => {
+                if (!aiSpeaking) {
+                    // First chunk starting — mute mic
+                    aiSpeaking = true;
+                    setMicMuteUI(true);
+                    if (socket && socket.readyState === WebSocket.OPEN)
+                        socket.send(JSON.stringify({ type: 'ai_speaking_start' }));
+                    dbg('[QUEUE]', 'First chunk started — mic MUTED, ai_speaking_start sent');
+                }
+            };
+
+            currentAudio.onended = () => {
+                URL.revokeObjectURL(url);   // free memory
+                currentAudio = null;
+                dbg('[QUEUE]', `Chunk ${index} finished`);
+                playNextChunk();            // play next chunk immediately
+            };
+
+            currentAudio.onerror = (e) => {
+                dbg('[QUEUE]', `Chunk ${index} playback error: ${e.target.error?.message}`);
+                URL.revokeObjectURL(url);
+                currentAudio = null;
+                playNextChunk();            // skip broken chunk, keep going
+            };
+
+            currentAudio.play().catch(e => {
+                dbg('[QUEUE]', `chunk ${index} play() rejected: ${e}`);
+                playNextChunk();
+            });
+        }
+
+        function onAllChunksDone() {
+            // Called once every chunk for this response has finished playing
+            aiSpeaking = false;
+            setMicMuteUI(false);
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
+            setStatus('સાંભળી રહ્યો છું...', true);
+            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
+            transcriptBox.classList.add('empty');
+            dbg('[QUEUE]', 'All chunks played — mic UN-MUTED, ai_speaking_end sent');
+        }
+
+        function clearAudioQueue() {
+            // Interrupt playback and drain queue (e.g. on session reset)
+            if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+            audioQueue = [];
+            queuePlaying = false;
+            if (aiSpeaking) {
+                aiSpeaking = false;
+                if (socket && socket.readyState === WebSocket.OPEN)
+                    socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
+            }
+        }
+
         // ── SILENCE COMMIT STATE ──────────────────────────────────────────────
-        // These variables implement client-side "end of utterance" detection.
-        // Since Sarvam's saaras:v3 streaming rarely emits is_final=true from
-        // a browser WebSocket context (unlike the Python client), we detect
-        // silence ourselves and force-commit the last partial transcript.
-        let lastPartialTranscript = '';   // most recent partial text from Sarvam
-        let silenceTimer = null;          // setTimeout handle for commit trigger
-        let speechDetected = false;       // true once we've seen non-silent audio
-        let commitBarAnimFrame = null;    // rAF handle for the commit bar animation
-        let commitBarStart = null;        // timestamp when silence timer started
+        let lastPartialTranscript = '';
+        let silenceTimer = null;
+        let speechDetected = false;
+        let commitBarAnimFrame = null;
+        let commitBarStart = null;
 
         const settings = {
             lang: 'gu-IN',
             speaker: 'simran',
             sampleRate: 16000,
-            silenceTimeout: 800,   // ms of silence before committing partial transcript
+            silenceTimeout: 800,
         };
 
         // ── DOM refs ──────────────────────────────────────────────────────────
@@ -1183,45 +1262,30 @@
         const commitBar = document.getElementById('commitBar');
         const commitBarFill = document.getElementById('commitBarFill');
 
-        // ── Silence commit helpers ─────────────────────────────────────────────
-        /**
-         * Called whenever we receive a non-empty partial transcript from Sarvam.
-         * Resets the silence timer so we only commit after the user has truly stopped.
-         */
+        // ── Silence commit helpers ────────────────────────────────────────────
         function onPartialTranscript(text) {
             lastPartialTranscript = text;
             speechDetected = true;
             resetSilenceTimer();
         }
 
-        /**
-         * Called when Sarvam sends is_final=true. This is the ideal path —
-         * immediately commit without waiting for silence timeout.
-         */
         function onFinalTranscript(text) {
             lastPartialTranscript = text;
             cancelSilenceTimer();
             commitTranscript(text, 'sarvam_final');
         }
 
-        /**
-         * Arms (or re-arms) the silence timer. When the timer fires, it means
-         * the user has been silent for `settings.silenceTimeout` ms after speaking,
-         * so we treat the last partial as a completed utterance.
-         */
         function resetSilenceTimer() {
             cancelSilenceTimer();
             if (!lastPartialTranscript) return;
-
             commitBarStart = Date.now();
             if (document.getElementById('showCommitBar').checked) {
                 commitBar.classList.add('active');
                 animateCommitBar();
             }
-
             silenceTimer = setTimeout(() => {
                 if (lastPartialTranscript) {
-                    dbg('[SILENCE]', `Silence timeout fired (${settings.silenceTimeout}ms) — committing: '${lastPartialTranscript}'`);
+                    dbg('[SILENCE]', `Timeout fired — committing: '${lastPartialTranscript}'`);
                     commitTranscript(lastPartialTranscript, 'silence_timeout');
                 }
             }, settings.silenceTimeout);
@@ -1238,37 +1302,25 @@
         function animateCommitBar() {
             commitBarAnimFrame = requestAnimationFrame(() => {
                 if (!commitBarStart) return;
-                const elapsed = Date.now() - commitBarStart;
-                const pct = Math.min(100, (elapsed / settings.silenceTimeout) * 100);
+                const pct = Math.min(100, ((Date.now() - commitBarStart) / settings.silenceTimeout) * 100);
                 commitBarFill.style.width = pct + '%';
                 if (pct < 100) animateCommitBar();
             });
         }
 
-        /**
-         * The single commit point. Sends the transcript to chat and notifies
-         * the backend as though it were a final transcript.
-         */
         function commitTranscript(text, source) {
             if (!text || !text.trim()) return;
             lastPartialTranscript = '';
             speechDetected = false;
             cancelSilenceTimer();
-
             commitCount++;
             document.getElementById('statCommits').textContent = commitCount;
-            dbg('[COMMIT]', `Committing transcript (source=${source}): '${text}'`);
-
-            // Update UI
+            dbg('[COMMIT]', `source=${source} | '${text}'`);
             addMessage('user', text);
             msgCount++;
             document.getElementById('statMsgs').textContent = msgCount;
-
-            // Notify backend that this is a final (committed) transcript
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'commit_transcript', text: text }));
-                dbg('[COMMIT]', `Sent commit_transcript to backend`);
-            }
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: 'commit_transcript', text }));
         }
 
         // ── Waveform ──────────────────────────────────────────────────────────
@@ -1317,93 +1369,83 @@
 
         // ── WebSocket & Mic ───────────────────────────────────────────────────
         async function startStreaming() {
-            dbg('[STEP 0] WS', `Opening WebSocket to ws://${window.location.host}/ws/voice`);
+            dbg('[WS]', `Opening ws://${window.location.host}/ws/voice`);
             socket = new WebSocket(`ws://${window.location.host}/ws/voice`);
             socket.binaryType = 'arraybuffer';
-            document.getElementById('wsEndpoint').textContent = `/ws/voice`;
+            document.getElementById('wsEndpoint').textContent = '/ws/voice';
             document.getElementById('statSession').textContent = `ses_${Date.now().toString(36)}`;
 
-            socket.onopen = () => { dbg('[STEP 0] WS', 'WebSocket CONNECTED'); setConn(true); };
-            socket.onclose = (ev) => { dbg('[STEP 0] WS', `WebSocket CLOSED — code=${ev.code}`); setConn(false); stopMic(); };
+            socket.onopen = () => { dbg('[WS]', 'CONNECTED'); setConn(true); };
+            socket.onclose = (ev) => { dbg('[WS]', `CLOSED code=${ev.code}`); setConn(false); stopMic(); };
             socket.onerror = () => { showToast('WebSocket error', 'error'); };
 
             socket.onmessage = async (event) => {
                 let data;
                 try { data = JSON.parse(event.data); } catch { return; }
-                dbg('[STEP 0] WS', `Message received | type='${data.type}'`);
 
-                // ── Partial / final transcript from Sarvam (via backend) ──────
+                // ── STT transcript ────────────────────────────────────────────
                 if (data.type === 'transcript') {
                     const text = data.text || '';
-                    dbg('[STEP 4] TRANSCRIPT', `is_final=${data.is_final} | text='${text}'`);
-
+                    dbg('[TRANSCRIPT]', `is_final=${data.is_final} | '${text}'`);
                     if (document.getElementById('showTranscript').checked) {
                         transcriptBox.classList.remove('empty');
                         transcriptBox.textContent = text;
                         transcriptBox.style.opacity = data.is_final ? '1' : '0.7';
                     }
-
-                    if (data.is_final) {
-                        // ── Ideal path: Sarvam gave us a final transcript ─────
-                        onFinalTranscript(text);
-                    } else {
-                        // ── Partial: arm the silence commit timer ─────────────
-                        onPartialTranscript(text);
-                    }
+                    data.is_final ? onFinalTranscript(text) : onPartialTranscript(text);
                 }
 
+                // ── LLM thinking ──────────────────────────────────────────────
                 if (data.type === 'processing_start') {
                     setStatus('AI વિચારી રહ્યો છે...', true);
                 }
 
+                // ── Tool call events ──────────────────────────────────────────
                 if (data.type === 'tool_call') {
                     const st = data.status === 'running' ? 'running' : data.status === 'ok' ? 'ok' : 'err';
                     logTool(data.name, st, data.observation || '');
                     if (data.status === 'ok' && data.name === 'book_appointment') logAppointment();
                 }
 
-                if (data.type === 'ai_reply') {
-                    setStatus('Responding…', true);
+                // ── ai_text: full reply text arrives before audio ─────────────
+                // Show the chat bubble immediately so the user can read while
+                // audio chunks stream in.
+                if (data.type === 'ai_text') {
+                    dbg('[AI_TEXT]', `Chat bubble | chunk_count=${data.chunk_count} | '${data.text.slice(0, 60)}'`);
                     addMessage('ai', data.text);
                     msgCount++;
                     document.getElementById('statMsgs').textContent = msgCount;
+                    setStatus(`AI બોલી રહ્યો છે... (0/${data.chunk_count})`, true);
+                    // Clear any leftover queue from previous response
+                    clearAudioQueue();
+                }
 
-                    if (data.audio) {
-                        const blob = b64ToBlob(data.audio, 'audio/wav');
-                        const url = URL.createObjectURL(blob);
-                        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-                        currentAudio = new Audio(url);
+                // ── audio_chunk: one TTS sentence chunk ───────────────────────
+                // Enqueue immediately — playback starts as soon as chunk 0 arrives.
+                // Subsequent chunks arrive while chunk 0 is playing.
+                if (data.type === 'audio_chunk') {
+                    dbg('[AUDIO_CHUNK]', `chunk ${data.index + 1}/${data.total} | '${data.text.slice(0, 40)}'`);
+                    setStatus(`AI બોલી રહ્યો છે... (${data.index + 1}/${data.total})`, true);
+                    enqueueChunk(data.audio, data.text, data.index);
+                }
 
-                        currentAudio.onplay = () => {
-                            aiSpeaking = true;
-                            setMicMuteUI(true);
-                            if (socket.readyState === WebSocket.OPEN)
-                                socket.send(JSON.stringify({ type: 'ai_speaking_start' }));
-                        };
-                        currentAudio.onended = () => {
-                            aiSpeaking = false;
-                            setMicMuteUI(false);
-                            if (socket.readyState === WebSocket.OPEN)
-                                socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
-                            setStatus('સાંભળી રહ્યો છું...', true);
-                            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
-                            transcriptBox.classList.add('empty');
-                        };
-                        currentAudio.onerror = (e) => { dbg('[AUDIO]', `Playback error: ${e.target.error?.message}`); };
-                        currentAudio.play().catch(e => dbg('[AUDIO]', `play() rejected: ${e}`));
-                    } else {
-                        setStatus('Ready', false);
-                    }
+                // ── tts_done: all chunks have been sent ───────────────────────
+                // Note: we do NOT stop the mic here — onAllChunksDone() handles
+                // that once the LAST chunk finishes PLAYING (which may be later
+                // than when tts_done arrives, since audio is still in the queue).
+                if (data.type === 'tts_done') {
+                    dbg('[TTS_DONE]', 'All chunks received from backend');
                 }
             };
 
-            dbg('[STEP 1] MIC', 'Requesting microphone access');
+            // ── Mic setup ─────────────────────────────────────────────────────
+            dbg('[MIC]', 'Requesting microphone access');
             let stream;
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                dbg('[STEP 1] MIC', 'Microphone GRANTED');
+                dbg('[MIC]', 'GRANTED');
             } catch (err) {
-                dbg('[STEP 1] MIC', `Microphone DENIED: ${err}`);
+                dbg('[MIC]', `DENIED: ${err}`);
                 throw err;
             }
 
@@ -1418,39 +1460,26 @@
             _droppedAI = 0; _droppedVAD = 0; _sentToServer = 0;
 
             processor.onaudioprocess = (e) => {
-                // Hard gate: never send mic audio while AI is playing (echo prevention)
                 if (aiSpeaking) { _droppedAI++; return; }
 
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
+                for (let i = 0; i < inputData.length; i++)
                     pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                }
 
                 const rms = Math.sqrt(pcmData.reduce((s, v) => s + v * v, 0) / pcmData.length);
-
-                // ROOT CAUSE FIX:
-                // Previously silent packets (rms < 300) were dropped here and never
-                // sent to Sarvam. Sarvam received NO DATA during pauses, so its
-                // internal VAD never triggered — it only returned a transcript when
-                // the NEXT speech burst arrived, causing 12–34 second STT delays.
-                //
-                // Fix: send ALL packets (speech + silence) to backend/Sarvam.
-                // Sarvam's own VAD now sees real silence → emits transcript within
-                // 1–2 seconds of the user stopping. The silence commit timer below
-                // remains as a fallback only.
                 const isSpeech = rms > 300;
+
                 if (isSpeech) {
                     _sentToServer++;
-                    if (_sentToServer % 50 === 1)
-                        dbg('[SEND]', `speech pkt#=${_sentToServer} rms=${rms.toFixed(1)}`);
+                    if (_sentToServer % 50 === 1) dbg('[SEND]', `speech pkt#=${_sentToServer} rms=${rms.toFixed(1)}`);
                 } else {
                     _droppedVAD++;
-                    if (_droppedVAD % 200 === 1)
-                        dbg('[SEND]', `silence pkt rms=${rms.toFixed(1)} — forwarded to Sarvam VAD`);
+                    if (_droppedVAD % 200 === 1) dbg('[SEND]', `silence pkt rms=${rms.toFixed(1)} → Sarvam VAD`);
                 }
 
-                // Always send — speech and silence both
+                // Send ALL packets (speech + silence) — Sarvam needs silence data
+                // to fire its internal VAD and return is_final quickly.
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(pcmData.buffer);
                     packetCount++;
@@ -1459,6 +1488,7 @@
             };
         }
 
+        // ── UI helpers ────────────────────────────────────────────────────────
         function setMicMuteUI(muted) {
             micRingWrap.style.opacity = muted ? '0.3' : '1';
             micBtn.style.cursor = muted ? 'not-allowed' : 'pointer';
@@ -1480,7 +1510,6 @@
         async function toggleMic() {
             if (!audioContext) audioContext = new AudioContext({ sampleRate: settings.sampleRate });
             if (audioContext.state === 'suspended') await audioContext.resume();
-
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 await startStreaming();
                 isListening = true;
@@ -1496,7 +1525,6 @@
             }
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
         function setConn(online) {
             connDot.className = 'status-dot' + (online ? ' live' : '');
             connLabel.textContent = online ? 'Connected' : 'Disconnected';
@@ -1620,6 +1648,7 @@
         function resetSession() {
             if (socket && socket.readyState === WebSocket.OPEN) socket.close();
             stopMic();
+            clearAudioQueue();
             clearChat();
             toolLogEl.innerHTML = '<div style="color:var(--border);">— awaiting tool calls —</div>';
             document.getElementById('apptList').innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments this session.</div>';

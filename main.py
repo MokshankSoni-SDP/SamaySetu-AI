@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import base64
 import asyncio
@@ -6,7 +7,7 @@ import struct
 import traceback
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from sarvamai import AsyncSarvamAI, SarvamAI
+from sarvamai import AsyncSarvamAI
 from dotenv import load_dotenv
 from typing import Dict, List
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -27,18 +28,9 @@ load_dotenv()
 app = FastAPI()
 
 SARVAM_API_KEY = os.getenv('SARVAM_API_KEY')
-
-# FIX 1: Use AsyncSarvamAI for TTS so it doesn't block the event loop.
-# The old SarvamAI (sync) client was running a blocking HTTP call inside
-# an async function, stalling the entire event loop for 4–8 seconds.
 client_stt = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
 client_tts = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
 
-# FIX 2: Use ainvoke (async) instead of invoke (sync) for the LLM.
-# langchain_groq's .invoke() is a blocking call. In an async FastAPI
-# handler it blocks the event loop for the full LLM round-trip (~1s).
-# Using .ainvoke() lets other coroutines (audio streaming, etc.) run
-# while waiting for Groq's response.
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
 tools = [check_calendar_availability, book_appointment, cancel_appointment,
          reschedule_appointment, suggest_next_available_slot]
@@ -57,23 +49,83 @@ def print_token_usage(msg, step_name):
               f"completion={usage.get('completion_tokens')} "
               f"total={usage.get('total_tokens')} ---")
 
-# ── Calendar tool runner (async wrapper) ───────────────────────────────────────
-# FIX 3: Google Calendar API calls are synchronous (blocking HTTP).
-# Running them with asyncio.to_thread() moves them off the event loop
-# into a thread pool, so the event loop stays responsive during the
-# 1–4 second calendar API round-trips.
+# ── Calendar tool runner (non-blocking) ───────────────────────────────────────
 async def run_tool_async(tool_name: str, args: dict):
     func = globals()[tool_name]
     return await asyncio.to_thread(func, **args)
 
-# ── Brain ──────────────────────────────────────────────────────────────────────
+# ── Sentence splitter ──────────────────────────────────────────────────────────
+# Splits Gujarati + mixed text on sentence-ending punctuation.
+# Keeps chunks >= MIN_CHUNK_CHARS so we don't fire TTS for tiny fragments.
+MIN_CHUNK_CHARS = 20
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
+def split_into_sentences(text: str) -> List[str]:
+    """
+    Split reply text into TTS-ready sentence chunks.
+    Handles Gujarati (।), Hindi (।) and standard punctuation (. ! ?).
+    Short fragments are merged with the previous chunk to avoid
+    tiny round-trips to the TTS API.
+    """
+    raw = re.split(r'(?<=[.!?।\u0964])\s+', text.strip())
+    chunks, buffer = [], ""
+    for part in raw:
+        part = part.strip()
+        if not part:
+            continue
+        buffer = (buffer + " " + part).strip() if buffer else part
+        if len(buffer) >= MIN_CHUNK_CHARS:
+            chunks.append(buffer)
+            buffer = ""
+    if buffer:
+        if chunks and len(buffer) < MIN_CHUNK_CHARS:
+            chunks[-1] += " " + buffer   # merge tiny tail into last chunk
+        else:
+            chunks.append(buffer)
+    return chunks or [text]             # fallback: treat whole text as 1 chunk
+
+# ── TTS with retry ─────────────────────────────────────────────────────────────
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=4),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed, retrying…")
+)
+async def tts_convert(text: str) -> str:
+    """Call Sarvam TTS and return base64 audio string."""
+    res = await client_tts.text_to_speech.convert(
+        text=text,
+        target_language_code="gu-IN",
+        model="bulbul:v3",
+        speaker="simran"
+    )
+    return res.audios[0]
+
+# ── LLM with retry ────────────────────────────────────────────────────────────
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=5),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=lambda rs: log("[LLM_RETRY]", f"Attempt {rs.attempt_number} failed, retrying…")
+)
 async def safe_llm_call(messages):
     return await llm_with_tools.ainvoke(messages)
 
+# ── Brain ──────────────────────────────────────────────────────────────────────
 async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
-    t0 = datetime.now()
+    """
+    Streaming TTS pipeline:
+      1. LLM produces full reply text           (~1 s)
+      2. Split reply into sentences
+      3. Send full text to frontend immediately  (chat bubble appears)
+      4. For each sentence in order:
+           - Generate TTS chunk                 (~2 s per chunk)
+           - Send audio_chunk to frontend       (frontend queues + plays sequentially)
+      5. Send tts_done so frontend knows it's over
+
+    Result: user hears first sentence at ~3 s total instead of waiting
+    11 s for the entire audio blob.
+    """
+    t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
     day   = t0.strftime("%A")
 
@@ -89,50 +141,47 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     history.append(HumanMessage(content=user_text))
     recent_history = [history[0]] + history[-MAX_HISTORY:]
 
-    # ── LLM call (async) ──────────────────────────────────────────────────────
+    # ── Step 1: LLM ──────────────────────────────────────────────────────────
     t_llm = datetime.now()
-    log("[LLM]", f"ainvoke() start | {len(recent_history)} messages in context")
+    log("[LLM]", f"ainvoke() | {len(recent_history)} messages")
     try:
-        # FIX 2 applied: ainvoke instead of invoke
         ai_msg = await safe_llm_call(recent_history)
-        llm_ms = (datetime.now() - t_llm).total_seconds()
-        log("[LLM]", f"Done in {llm_ms:.2f}s | tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
+        log("[LLM]", f"Done in {(datetime.now()-t_llm).total_seconds():.2f}s | "
+            f"tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
         print_token_usage(ai_msg, "Initial LLM")
     except Exception as e:
         log("[LLM]", f"FAILED: {e}\n{traceback.format_exc()}")
         raise
 
-    # ── Tool loop ─────────────────────────────────────────────────────────────
+    # ── Step 2: Tool loop ─────────────────────────────────────────────────────
     tool_iteration = 0
     while ai_msg.tool_calls:
         tool_iteration += 1
-        log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s) requested")
+        log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
 
-        # FIX 3 applied: run all tools in this iteration concurrently
-        # If the LLM ever requests multiple tools at once, they run in parallel.
-        # Even for single-tool iterations this ensures the calendar call is
-        # non-blocking (asyncio.to_thread keeps the event loop free).
         async def execute_tool(tool_call):
             tname = tool_call["name"]
             targs = tool_call["args"]
             log("[TOOL]", f"Executing '{tname}' | args={targs}")
-            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": "running"})
+            await websocket.send_json({
+                "type": "tool_call", "name": tname, "args": targs, "status": "running"
+            })
             t_tool = datetime.now()
             try:
                 obs    = await run_tool_async(tname, targs)
                 status = "ok"
-                tool_ms = (datetime.now() - t_tool).total_seconds()
-                log("[TOOL]", f"'{tname}' OK in {tool_ms:.2f}s | result='{str(obs)[:100]}'")
+                log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s "
+                    f"| result='{str(obs)[:100]}'")
             except Exception as e:
-                obs    = f"Error: {e}"
-                status = "error"
+                obs, status = f"Error: {e}", "error"
                 log("[TOOL]", f"'{tname}' FAILED: {e}")
-            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs,
-                                       "status": status, "observation": str(obs)})
+            await websocket.send_json({
+                "type": "tool_call", "name": tname, "args": targs,
+                "status": status, "observation": str(obs)
+            })
             return ToolMessage(content=str(obs), tool_call_id=tool_call["id"])
 
-        # Run all tools for this iteration concurrently
         tool_messages = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
         history.extend(tool_messages)
 
@@ -141,8 +190,8 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         log("[LLM]", f"Re-invoking after tool iteration #{tool_iteration}")
         try:
             ai_msg = await safe_llm_call(recent_history)
-            llm2_ms = (datetime.now() - t_llm2).total_seconds()
-            log("[LLM]", f"Post-tool done in {llm2_ms:.2f}s | tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
+            log("[LLM]", f"Post-tool done in {(datetime.now()-t_llm2).total_seconds():.2f}s | "
+                f"tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
             print_token_usage(ai_msg, f"Post-Tool #{tool_iteration}")
         except Exception as e:
             log("[LLM]", f"POST-TOOL FAILED: {e}\n{traceback.format_exc()}")
@@ -151,37 +200,48 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     history.append(ai_msg)
     reply_text = ai_msg.content
 
-    # ── TTS (async, non-blocking) ─────────────────────────────────────────────
-    # FIX 1 applied: AsyncSarvamAI client — awaitable, doesn't block event loop.
+    # ── Step 3: Send full text immediately (chat bubble appears before audio) ─
+    sentences = split_into_sentences(reply_text)
+    log("[TTS]", f"Reply split into {len(sentences)} chunk(s): {[s[:40]+'…' for s in sentences]}")
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=4),
-        retry=retry_if_exception_type(Exception),
-        before_sleep=lambda retry_state: log("[RETRY]", f"TTS failed. Attempt {retry_state.attempt_number}...")
-    )
-    async def generate_tts(text):
-        return await client_tts.text_to_speech.convert(
-            text=text,
-            target_language_code="gu-IN",
-            model="bulbul:v3",
-            speaker="simran"
-        )
+    await websocket.send_json({
+        "type":        "ai_text",
+        "text":        reply_text,
+        "chunk_count": len(sentences)
+    })
 
-    t_tts = datetime.now()
-    log("[TTS]", f"Request start | text_len={len(reply_text)} chars | preview='{reply_text[:80]}'")
-    try:
-        tts_res   = await generate_tts(reply_text)
-        audio_b64 = tts_res.audios[0]
-        tts_ms    = (datetime.now() - t_tts).total_seconds()
-        log("[TTS]", f"Done in {tts_ms:.2f}s | audio_b64 len={len(audio_b64)} chars")
-    except Exception as e:
-        log("[TTS]", f"FAILED: {e}\n{traceback.format_exc()}")
-        raise
+    # ── Step 4: Generate + stream TTS chunks sequentially ────────────────────
+    # Sequential (not parallel) keeps audio in correct order without any
+    # reordering logic on the frontend. Each chunk takes ~2 s; the user
+    # hears chunk 1 before chunk 2 is even generated.
+    t_tts_total = datetime.now()
+    for idx, sentence in enumerate(sentences):
+        t_chunk = datetime.now()
+        log("[TTS]", f"Chunk {idx+1}/{len(sentences)} start | '{sentence[:60]}'")
+        try:
+            audio_b64 = await tts_convert(sentence)
+            log("[TTS]", f"Chunk {idx+1} ready in {(datetime.now()-t_chunk).total_seconds():.2f}s "
+                f"| b64_len={len(audio_b64)}")
+        except Exception as e:
+            # Skip failed chunks — better to have a short gap than crash everything
+            log("[TTS]", f"Chunk {idx+1} FAILED after retries: {e} — skipping")
+            continue
 
-    total_ms = (datetime.now() - t0).total_seconds()
-    log("[BRAIN]", f"COMPLETE in {total_ms:.2f}s total")
-    return reply_text, audio_b64
+        await websocket.send_json({
+            "type":    "audio_chunk",
+            "index":   idx,
+            "total":   len(sentences),
+            "text":    sentence,
+            "audio":   audio_b64,
+            "is_last": idx == len(sentences) - 1
+        })
+        log("[TTS]", f"Chunk {idx+1} sent to frontend")
+
+    log("[TTS]", f"All chunks done | total_tts={( datetime.now()-t_tts_total).total_seconds():.2f}s")
+    log("[BRAIN]", f"COMPLETE in {(datetime.now()-t0).total_seconds():.2f}s total")
+
+    # Signal frontend: no more audio chunks for this response
+    await websocket.send_json({"type": "tts_done"})
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
@@ -201,76 +261,54 @@ async def websocket_endpoint(websocket: WebSocket):
         ) as sarvam_ws:
             log("[WS]", "Sarvam STT connection ESTABLISHED")
 
-            _recv = _drop_ai = _drop_vad = _sent = 0
+            _recv = _drop_ai = _sent = 0
             commit_queue: asyncio.Queue = asyncio.Queue()
 
             # ── Task 1: Browser audio → Sarvam STT ───────────────────────────
             async def browser_to_sarvam():
-                nonlocal _recv, _drop_ai, _drop_vad, _sent
+                nonlocal _recv, _drop_ai, _sent
                 log("[AUDIO_TASK]", "browser_to_sarvam() started")
                 try:
                     while True:
                         msg = await websocket.receive()
 
-                        # JSON control messages
                         if "text" in msg:
                             try:
                                 ctrl      = json.loads(msg["text"])
                                 ctrl_type = ctrl.get("type", "unknown")
-
                                 if ctrl_type == "ai_speaking_start":
                                     ai_speaking.set()
                                     log("[CTRL]", "ai_speaking_start → mic MUTED")
-
                                 elif ctrl_type == "ai_speaking_end":
                                     ai_speaking.clear()
                                     log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | "
-                                        f"recv={_recv} sent={_sent} drop_ai={_drop_ai} drop_vad={_drop_vad}")
-
+                                        f"recv={_recv} sent={_sent} drop_ai={_drop_ai}")
                                 elif ctrl_type == "commit_transcript":
                                     text = ctrl.get("text", "").strip()
                                     if text:
                                         log("[COMMIT]", f"Frontend committed: '{text}'")
                                         await commit_queue.put(text)
-                                    else:
-                                        log("[COMMIT]", "Empty commit — ignored")
-
                                 else:
                                     log("[CTRL]", f"Unknown type='{ctrl_type}'")
-
                             except Exception as e:
                                 log("[CTRL]", f"JSON parse error: {e}")
                             continue
 
-                        # Raw PCM audio
                         if "bytes" in msg:
                             _recv += 1
                             raw = msg["bytes"]
-
-                            # Always drop audio while AI is speaking (echo prevention)
                             if ai_speaking.is_set():
                                 _drop_ai += 1
                                 continue
-
-                            # ROOT CAUSE FIX:
-                            # Previously we dropped silent packets here with is_silent().
-                            # This caused Sarvam to receive NO DATA during pauses, so it
-                            # could not detect end-of-utterance — it only returned a
-                            # transcript when the NEXT speech burst arrived, causing
-                            # 12–34 second STT delays.
-                            #
-                            # Fix: forward ALL audio to Sarvam (speech + silence).
-                            # Sarvam's own internal VAD then detects the pause and
-                            # emits a transcript within 1–2 seconds of the user stopping.
-                            # The frontend's client-side VAD still handles the commit
-                            # timer as a fallback, but Sarvam will now fire is_final=True
-                            # much faster since it sees the actual silence data.
                             try:
-                                await sarvam_ws.transcribe(audio=base64.b64encode(raw).decode("utf-8"))
+                                await sarvam_ws.transcribe(
+                                    audio=base64.b64encode(raw).decode("utf-8")
+                                )
                                 _sent += 1
                                 if _sent % 50 == 1:
                                     rms = compute_rms(raw)
-                                    log("[STT_SEND]", f"pkt#{_sent} sent | rms={rms:.0f} ({'speech' if rms > 300 else 'silence'})")
+                                    log("[STT_SEND]", f"pkt#{_sent} | rms={rms:.0f} "
+                                        f"({'speech' if rms > 300 else 'silence'})")
                             except Exception as e:
                                 log("[STT_SEND]", f"FAILED: {e}")
 
@@ -279,7 +317,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     log("[AUDIO_TASK]", f"Crashed: {e}\n{traceback.format_exc()}")
 
-            # ── Task 2: Sarvam STT → frontend transcript events ───────────────
+            # ── Task 2: Sarvam STT → frontend ────────────────────────────────
             async def sarvam_to_frontend():
                 log("[STT_RECV]", "sarvam_to_frontend() started")
                 try:
@@ -291,7 +329,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         is_final   = getattr(response.data, 'is_final', False)
                         if not transcript:
                             continue
-
                         if is_final:
                             f_count += 1
                             log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
@@ -300,9 +337,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             p_count += 1
                             if p_count % 5 == 1:
                                 log("[STT_RECV]", f"Partial #{p_count}: '{transcript}'")
-
-                        await websocket.send_json({"type": "transcript", "text": transcript, "is_final": is_final})
-
+                        await websocket.send_json({
+                            "type": "transcript", "text": transcript, "is_final": is_final
+                        })
                 except Exception as e:
                     log("[STT_RECV]", f"Crashed: {e}\n{traceback.format_exc()}")
 
@@ -313,32 +350,27 @@ async def websocket_endpoint(websocket: WebSocket):
                     try:
                         sentence = await commit_queue.get()
                         log("[BRAIN_CONSUMER]", f"Dequeued: '{sentence}'")
-
                         if brain_lock.locked():
                             log("[BRAIN_CONSUMER]", "Brain BUSY — dropping sentence")
                             continue
-
                         async with brain_lock:
                             log("[BRAIN_CONSUMER]", "Lock ACQUIRED")
                             await websocket.send_json({"type": "processing_start"})
                             try:
-                                reply_text, audio_b64 = await run_brain(session_id, sentence, websocket)
+                                await run_brain(session_id, sentence, websocket)
                             except Exception as e:
                                 log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
                                 continue
-
-                            await websocket.send_json({"type": "ai_reply", "text": reply_text, "audio": audio_b64})
-                            log("[BRAIN_CONSUMER]", "ai_reply sent | Lock RELEASED")
-
+                            log("[BRAIN_CONSUMER]", "Lock RELEASED")
                     except asyncio.CancelledError:
                         log("[BRAIN_CONSUMER]", "Cancelled — exiting")
                         break
                     except Exception as e:
-                        log("[BRAIN_CONSUMER]", f"Unexpected error: {e}\n{traceback.format_exc()}")
+                        log("[BRAIN_CONSUMER]", f"Error: {e}\n{traceback.format_exc()}")
 
             log("[WS]", "Launching 3 async tasks")
             await asyncio.gather(browser_to_sarvam(), sarvam_to_frontend(), brain_consumer())
-            log("[WS]", "All tasks exited — session ending")
+            log("[WS]", "All tasks exited")
 
     except Exception as e:
         log("[WS]", f"Handler CRASHED: {e}\n{traceback.format_exc()}")
@@ -346,7 +378,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── Audio helpers ──────────────────────────────────────────────────────────────
 def compute_rms(raw_bytes: bytes) -> float:
-    """Return RMS energy of a raw Int16 PCM buffer."""
     if len(raw_bytes) < 2:
         return 0.0
     samples = struct.unpack(f"<{len(raw_bytes)//2}h", raw_bytes)
