@@ -924,7 +924,7 @@
                 <div>
                     <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Silence Timeout
                         (ms)</label>
-                    <input type="number" id="silenceTimeout" min="500" max="4000" value="1500"
+                    <input type="number" id="silenceTimeout" min="500" max="4000" value="800"
                         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;" />
                 </div>
                 <div>
@@ -1005,7 +1005,7 @@
                 <div class="config-card" style="display:flex;flex-direction:column;gap:12px;">
                     <div>
                         <label>Commit after silence (ms)</label>
-                        <input type="number" id="sidesilenceTimeout" min="500" max="4000" value="1500"
+                        <input type="number" id="sidesilenceTimeout" min="500" max="4000" value="800"
                             style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:var(--font-body);font-size:13px;outline:none;"
                             oninput="settings.silenceTimeout=parseInt(this.value)" />
                     </div>
@@ -1166,7 +1166,7 @@
             lang: 'gu-IN',
             speaker: 'simran',
             sampleRate: 16000,
-            silenceTimeout: 1500,   // ms of silence before committing partial transcript
+            silenceTimeout: 800,   // ms of silence before committing partial transcript
         };
 
         // ── DOM refs ──────────────────────────────────────────────────────────
@@ -1418,6 +1418,7 @@
             _droppedAI = 0; _droppedVAD = 0; _sentToServer = 0;
 
             processor.onaudioprocess = (e) => {
+                // Hard gate: never send mic audio while AI is playing (echo prevention)
                 if (aiSpeaking) { _droppedAI++; return; }
 
                 const inputData = e.inputBuffer.getChannelData(0);
@@ -1428,27 +1429,32 @@
 
                 const rms = Math.sqrt(pcmData.reduce((s, v) => s + v * v, 0) / pcmData.length);
 
-                // ── Client-side silence detection for commit timer ─────────────
-                // If the user was speaking but is now silent, the silence timer
-                // will fire and commit whatever partial transcript we have.
-                if (rms < 300) {
+                // ROOT CAUSE FIX:
+                // Previously silent packets (rms < 300) were dropped here and never
+                // sent to Sarvam. Sarvam received NO DATA during pauses, so its
+                // internal VAD never triggered — it only returned a transcript when
+                // the NEXT speech burst arrived, causing 12–34 second STT delays.
+                //
+                // Fix: send ALL packets (speech + silence) to backend/Sarvam.
+                // Sarvam's own VAD now sees real silence → emits transcript within
+                // 1–2 seconds of the user stopping. The silence commit timer below
+                // remains as a fallback only.
+                const isSpeech = rms > 300;
+                if (isSpeech) {
+                    _sentToServer++;
+                    if (_sentToServer % 50 === 1)
+                        dbg('[SEND]', `speech pkt#=${_sentToServer} rms=${rms.toFixed(1)}`);
+                } else {
                     _droppedVAD++;
-                    if (_droppedVAD % 50 === 1)
-                        dbg('[STEP 2] VAD', `Silence (rms=${rms.toFixed(1)}) | droppedVAD=${_droppedVAD}`);
-                    // Note: we do NOT return here if speechDetected — we still
-                    // need to feed Sarvam some audio so it doesn't disconnect,
-                    // but we skip non-speech to save bandwidth.
-                    return;
+                    if (_droppedVAD % 200 === 1)
+                        dbg('[SEND]', `silence pkt rms=${rms.toFixed(1)} — forwarded to Sarvam VAD`);
                 }
 
-                // Speech detected — send to backend/Sarvam
+                // Always send — speech and silence both
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(pcmData.buffer);
                     packetCount++;
-                    _sentToServer++;
                     document.getElementById('wsPackets').textContent = packetCount;
-                    if (_sentToServer % 50 === 1)
-                        dbg('[STEP 3] SEND', `pkt#=${_sentToServer} rms=${rms.toFixed(1)}`);
                 }
             };
         }
