@@ -5,8 +5,32 @@ import os
 import pytz
 from dotenv import load_dotenv
 import config
+from typing import Optional
 
 load_dotenv()
+
+# ── DB integration (optional — degrades gracefully if psycopg2 missing) ──────
+try:
+    from database.crud import (
+        create_appointment,
+        update_appointment_status,
+        update_rescheduled_appointment,
+        get_calendar_event_id,
+    )
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
+
+
+def _try_db(fn, *args, **kwargs):
+    """Helper to call a DB function, catching all errors so calendar ops never crash."""
+    if not _DB_AVAILABLE:
+        return None
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        print(f"[DB] Non-fatal DB error in calendar_tool: {e}")
+        return None
 
 SERVICE_ACCOUNT_FILE = 'service_account.json' 
 CALENDAR_ID = os.getenv('CALENDER_ID')
@@ -24,7 +48,7 @@ def is_past_time(start_time_str: str):
     now_dt = datetime.datetime.now(IST)
     return start_dt <= now_dt
 
-def check_calendar_availability(start_time_str: str,duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
+def check_calendar_availability(start_time_str: str,duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,phone_number: Optional[str] = None):
     """Checks if a 30-minute slot is free in Google Calendar."""
 
     if is_past_time(start_time_str):
@@ -58,7 +82,8 @@ def suggest_next_available_slot(
     start_time_str: str,
     duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
     search_hours: int = 4,
-    max_slots: int = 3
+    max_slots: int = 3,
+    phone_number: Optional[str] = None
 ):
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
@@ -89,8 +114,13 @@ def suggest_next_available_slot(
 
     return "No available slots found in the next few hours."
 
-def book_appointment(start_time_str: str, summary: str = "AI Appointment", duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
-    
+def book_appointment(
+    start_time_str: str,
+    summary: str = "AI Appointment",
+    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    phone_number: Optional[str] = None,
+):
+    """Books a Google Calendar event and stores the appointment in the DB."""
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
 
@@ -99,28 +129,29 @@ def book_appointment(start_time_str: str, summary: str = "AI Appointment", durat
         return "Error: Slot already occupied."
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
-    
-    end_dt = naive_dt + datetime.timedelta(minutes=duration_minutes)
+    end_dt   = naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event = {
         'summary': summary,
         'description': 'Booked via SamaySetu Gujarati AI Bot',
-        'start': {
-            'dateTime': naive_dt.strftime('%Y-%m-%dT%H:%M:%S'),
-            'timeZone': 'Asia/Kolkata',
-        },
-        'end': {
-            'dateTime': end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
-            'timeZone': 'Asia/Kolkata',
-        },
+        'start': {'dateTime': naive_dt.strftime('%Y-%m-%dT%H:%M:%S'), 'timeZone': 'Asia/Kolkata'},
+        'end':   {'dateTime': end_dt.strftime('%Y-%m-%dT%H:%M:%S'),   'timeZone': 'Asia/Kolkata'},
     }
 
-    created_event = service.events().insert(
-        calendarId=CALENDAR_ID,
-        body=event
-    ).execute()
+    created_event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+    calendar_event_id = created_event.get('id')
 
-    return f"SUCCESS: Appointment booked."
+    # ── DB write: store appointment linked to user ──────────────────────────
+    if phone_number and calendar_event_id:
+        _try_db(
+            create_appointment,
+            phone_number,
+            naive_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            calendar_event_id,
+        )
+
+    return "SUCCESS: Appointment booked."
 
 def find_event_id(start_time_str: str):
     """Helper to find an event ID based on a start time."""
@@ -140,36 +171,67 @@ def find_event_id(start_time_str: str):
     events = events_result.get('items', [])
     return events[0]['id'] if events else None
 
-def cancel_appointment(start_time_str: str):
-    """Deletes an appointment at the given start time."""
-    event_id = find_event_id(start_time_str)
+def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
+    """Deletes an appointment at the given start time. Prefers stored event_id from DB."""
+    # Prefer the stored event_id from DB (faster than a Calendar list call)
+    event_id = None
+    if phone_number:
+        event_id = _try_db(get_calendar_event_id, phone_number, start_time_str)
+    if not event_id:
+        event_id = find_event_id(start_time_str)   # fallback to Calendar API lookup
     if not event_id:
         return f"Error: No appointment found at {start_time_str} to cancel."
-    
+
     service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+
+    # ── DB write: mark appointment CANCELLED ───────────────────────────────
+    if phone_number:
+        _try_db(update_appointment_status, phone_number, start_time_str, "CANCELLED")
+
     return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
 
-def reschedule_appointment(old_start_time_str: str, new_start_time_str: str, duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION):
-    """Moves an appointment from an old time to a new time."""
-    event_id = find_event_id(old_start_time_str)
+def reschedule_appointment(
+    old_start_time_str: str,
+    new_start_time_str: str,
+    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    phone_number: Optional[str] = None,
+):
+    """Moves an appointment from an old time to a new time. Prefers stored event_id from DB."""
+    # Prefer the stored event_id from DB (faster)
+    event_id = None
+    if phone_number:
+        event_id = _try_db(get_calendar_event_id, phone_number, old_start_time_str)
+    if not event_id:
+        event_id = find_event_id(old_start_time_str)  # fallback
     if not event_id:
         return f"Error: No appointment found at {old_start_time_str}."
 
-    # First, check if the NEW slot is free
+    # Check if the NEW slot is free
     availability = check_calendar_availability(new_start_time_str)
     if "BUSY" in availability:
         return f"Error: The new slot {new_start_time_str} is already occupied."
 
     # Get existing event to keep the summary/description
     event = service.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
-    
+
     new_naive_dt = datetime.datetime.fromisoformat(new_start_time_str)
-    new_end_dt = new_naive_dt + datetime.timedelta(minutes=duration_minutes)
+    new_end_dt   = new_naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event['start']['dateTime'] = new_naive_dt.strftime('%Y-%m-%dT%H:%M:%S')
-    event['end']['dateTime'] = new_end_dt.strftime('%Y-%m-%dT%H:%M:%S')
+    event['end']['dateTime']   = new_end_dt.strftime('%Y-%m-%dT%H:%M:%S')
 
     service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
+
+    # ── DB write: update appointment times and mark RESCHEDULED ───────────
+    if phone_number:
+        _try_db(
+            update_rescheduled_appointment,
+            phone_number,
+            old_start_time_str,
+            new_start_time_str,
+            new_end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+        )
+
     return f"SUCCESS: Appointment moved from {old_start_time_str} to {new_start_time_str}."
 
 def is_within_business_hours(start_time_str: str):

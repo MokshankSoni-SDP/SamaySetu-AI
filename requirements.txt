@@ -13,3 +13,4 @@ pyaudio
 sounddevice
 soundfile
 sarvamai
+psycopg2-binary

@@ -5,11 +5,13 @@ import base64
 import asyncio
 import struct
 import traceback
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sarvamai import AsyncSarvamAI
 from dotenv import load_dotenv
-from typing import Dict, List
+from typing import Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 import prompts
@@ -18,6 +20,18 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from datetime import datetime
 
+# ── Database imports ────────────────────────────────────────────────────────
+try:
+    from database.models import create_tables
+    from database.crud import (
+        create_user_if_not_exists,
+        get_user_appointments,
+    )
+    DB_AVAILABLE = True
+except ImportError as _db_import_err:
+    DB_AVAILABLE = False
+    print(f"[DB] psycopg2 not installed or database module missing: {_db_import_err}")
+
 # ── Logging helper ─────────────────────────────────────────────────────────────
 def log(step: str, msg: str):
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -25,7 +39,27 @@ def log(step: str, msg: str):
 
 # ── Setup & Environment ────────────────────────────────────────────────────────
 load_dotenv()
-app = FastAPI()
+
+
+# ── FastAPI lifespan: initialise DB tables on startup ──────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup tasks (DB table creation) then yield to serve requests."""
+    if DB_AVAILABLE:
+        await asyncio.to_thread(create_tables)
+    else:
+        print("[DB] Skipping table creation — psycopg2 unavailable.")
+    yield   # application runs
+    # (shutdown cleanup goes here if needed)
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+# ── Pydantic models ─────────────────────────────────────────────────────────
+class UserLoginRequest(BaseModel):
+    phone_number: str
+    name: Optional[str] = None
 
 SARVAM_API_KEY = os.getenv('SARVAM_API_KEY')
 client_stt = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
@@ -38,8 +72,51 @@ llm_with_tools = llm.bind_tools(tools)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-chat_sessions: Dict[str, List] = {}
+# chat_sessions maps session_id → {"history": [...], "phone_number": str|None}
+chat_sessions: Dict[str, dict] = {}
 MAX_HISTORY = 5
+
+
+# ── REST endpoints ──────────────────────────────────────────────────────────
+
+@app.post("/user/login")
+async def user_login(req: UserLoginRequest):
+    """
+    Registers a new user or returns existing user details.
+    Phone number acts as the primary identifier.
+    """
+    if not req.phone_number or not req.phone_number.strip():
+        raise HTTPException(status_code=400, detail="phone_number is required")
+
+    if not DB_AVAILABLE:
+        # Graceful degradation: allow login even without DB
+        return {"status": "success", "phone_number": req.phone_number, "db": False}
+
+    try:
+        await asyncio.to_thread(
+            create_user_if_not_exists,
+            req.phone_number.strip(),
+            req.name
+        )
+        return {"status": "success", "phone_number": req.phone_number.strip()}
+    except Exception as e:
+        print(f"[DB] /user/login error: {e}")
+        raise HTTPException(status_code=500, detail="Database error during login")
+
+
+@app.get("/appointments/{phone_number}")
+async def get_appointments(phone_number: str):
+    """
+    Returns all appointments for a user ordered by most recent first.
+    """
+    if not DB_AVAILABLE:
+        return []
+    try:
+        appointments = await asyncio.to_thread(get_user_appointments, phone_number)
+        return appointments
+    except Exception as e:
+        print(f"[DB] /appointments/{phone_number} error: {e}")
+        raise HTTPException(status_code=500, detail="Could not fetch appointments")
 
 # ── Token usage logger ─────────────────────────────────────────────────────────
 def print_token_usage(msg, step_name):
@@ -131,15 +208,31 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
 
     log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}'")
 
+    # Initialise or retrieve session metadata.
+    # NOTE: The WS handler pre-creates the session with empty history so the
+    # phone_number is available immediately. We detect this here and inject the
+    # system prompt, ensuring the LLM always knows today's date.
     if session_id not in chat_sessions:
         log("[BRAIN]", "New session — initialising with system prompt")
-        chat_sessions[session_id] = [SystemMessage(content=prompts.get_system_prompt(today, day))]
-    else:
-        log("[BRAIN]", f"Existing session | history len={len(chat_sessions[session_id])}")
+        chat_sessions[session_id] = {
+            "history": [],
+            "phone_number": None,
+        }
 
-    history = chat_sessions[session_id]
+    session_data = chat_sessions[session_id]
+    history      = session_data["history"]
+    phone_number = session_data.get("phone_number")
+
+    # Add system prompt if missing (first call in this session)
+    if not history or not isinstance(history[0], SystemMessage):
+        log("[BRAIN]", f"Injecting system prompt | today={today} day={day}")
+        history.insert(0, SystemMessage(content=prompts.get_system_prompt(today, day)))
+    else:
+        log("[BRAIN]", f"Existing session | history len={len(history)}")
+
     history.append(HumanMessage(content=user_text))
     recent_history = [history[0]] + history[-MAX_HISTORY:]
+
 
     # ── Step 1: LLM ──────────────────────────────────────────────────────────
     t_llm = datetime.now()
@@ -163,6 +256,9 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         async def execute_tool(tool_call):
             tname = tool_call["name"]
             targs = tool_call["args"]
+            # Inject phone_number for DB integration (ignored if None)
+            if phone_number:
+                targs = {**targs, "phone_number": phone_number}
             log("[TOOL]", f"Executing '{tname}' | args={targs}")
             await websocket.send_json({
                 "type": "tool_call", "name": tname, "args": targs, "status": "running"
@@ -246,10 +342,14 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @app.websocket("/ws/voice")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] = None):
+    """Voice WebSocket. Accepts optional ?phone_number=... query param to associate
+    the session with a logged-in user so calendar ops can write to the DB."""
     await websocket.accept()
     session_id = f"web_{datetime.now().strftime('%H%M%S')}"
-    log("[WS]", f"Connection ACCEPTED | session_id='{session_id}'")
+    log("[WS]", f"Connection ACCEPTED | session_id='{session_id}' | phone='{phone_number}'")
+    # Store phone_number in session so run_brain() can pass it to calendar tools
+    chat_sessions[session_id] = {"history": [], "phone_number": phone_number}
 
     brain_lock  = asyncio.Lock()
     ai_speaking = asyncio.Event()
@@ -276,6 +376,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             try:
                                 ctrl      = json.loads(msg["text"])
                                 ctrl_type = ctrl.get("type", "unknown")
+
                                 if ctrl_type == "ai_speaking_start":
                                     ai_speaking.set()
                                     log("[CTRL]", "ai_speaking_start → mic MUTED")
@@ -288,6 +389,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                     if text:
                                         log("[COMMIT]", f"Frontend committed: '{text}'")
                                         await commit_queue.put(text)
+                                elif ctrl_type == "set_user":
+                                    # Frontend can also send phone via WS message as backup
+                                    phone = ctrl.get("phone_number")
+                                    if phone and session_id in chat_sessions:
+                                        chat_sessions[session_id]["phone_number"] = phone
+                                        log("[WS]", f"User phone updated via set_user: {phone}")
                                 else:
                                     log("[CTRL]", f"Unknown type='{ctrl_type}'")
                             except Exception as e:

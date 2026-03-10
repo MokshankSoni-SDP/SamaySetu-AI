@@ -885,6 +885,195 @@
                 padding: 28px 16px;
             }
         }
+
+        /* ── LOGIN OVERLAY ────────────────────────────────────────────── */
+        #loginOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 12, 16, 0.96);
+            backdrop-filter: blur(16px);
+            z-index: 300;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fade-in 0.4s ease;
+        }
+
+        #loginOverlay.hidden {
+            display: none;
+        }
+
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .login-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 44px 40px;
+            width: 420px;
+            max-width: 92vw;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 60px rgba(245, 166, 35, 0.06);
+            animation: slide-in 0.4s ease;
+        }
+
+        .login-logo {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 32px;
+        }
+
+        .login-logo-mark {
+            width: 52px;
+            height: 52px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 14px;
+            display: grid;
+            place-items: center;
+            font-family: var(--font-display);
+            font-size: 24px;
+            font-weight: 700;
+            color: #0a0c10;
+            box-shadow: 0 0 32px var(--glow);
+        }
+
+        .login-logo-text h2 {
+            font-family: var(--font-display);
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .login-logo-text p {
+            font-size: 12px;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+            margin-top: 2px;
+        }
+
+        .login-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+
+        .login-field label {
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .login-field input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-family: var(--font-body);
+            font-size: 15px;
+            padding: 12px 14px;
+            outline: none;
+            transition: border-color 0.25s, box-shadow 0.25s;
+            letter-spacing: 0.04em;
+        }
+
+        .login-field input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.12);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #0a0c10;
+            font-family: var(--font-body);
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.04em;
+            margin-top: 8px;
+            transition: opacity 0.2s, transform 0.15s;
+        }
+
+        .login-btn:hover {
+            opacity: 0.88;
+        }
+
+        .login-btn:active {
+            transform: scale(0.98);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .login-hint {
+            font-size: 11px;
+            color: var(--muted);
+            text-align: center;
+            margin-top: 18px;
+            line-height: 1.6;
+        }
+
+        /* ── appointment status tags ── */
+        .appt-item .tag.cancelled {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--danger);
+        }
+
+        .appt-item .tag.rescheduled {
+            background: rgba(96, 165, 250, 0.12);
+            color: var(--info);
+        }
+
+        /* ── logout button ── */
+        .logout-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 8px;
+            padding: 5px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: var(--font-body);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .logout-btn:hover {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .user-badge {
+            font-size: 12px;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-phone {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
     </style>
 </head>
 
@@ -894,6 +1083,41 @@
     <div class="blob blob-3"></div>
 
     <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ── LOGIN OVERLAY ───────────────────────────────────────────── -->
+    <div id="loginOverlay">
+        <div class="login-card">
+            <div class="login-logo">
+                <div class="login-logo-mark">ਸ</div>
+                <div class="login-logo-text">
+                    <h2>SamaySetu AI</h2>
+                    <p>GUJARATI VOICE BOOKING ASSISTANT</p>
+                </div>
+            </div>
+
+            <div class="login-field">
+                <label for="loginPhone">📞 Phone Number</label>
+                <input type="tel" id="loginPhone" placeholder="e.g. 9876543210" maxlength="15" inputmode="numeric"
+                    onkeydown="if(event.key==='Enter') doLogin()" />
+            </div>
+
+            <div class="login-field">
+                <label for="loginName">👤 Your Name <span
+                        style="color:var(--border);font-size:10px">(optional)</span></label>
+                <input type="text" id="loginName" placeholder="e.g. Raj Patel"
+                    onkeydown="if(event.key==='Enter') doLogin()" />
+            </div>
+
+            <button class="login-btn" id="loginBtn" onclick="doLogin()">
+                → &nbsp;Continue to Voice Assistant
+            </button>
+
+            <p class="login-hint">
+                Your phone number is used only to store your appointment history.<br>
+                No OTP or password required.
+            </p>
+        </div>
+    </div>
 
     <!-- Settings Modal -->
     <div class="modal-overlay" id="settingsModal">
@@ -954,9 +1178,18 @@
                     <span>Gujarati Voice Booking Assistant</span>
                 </div>
             </div>
-            <div class="header-status">
-                <div class="status-dot" id="connDot"></div>
-                <span id="connLabel">Disconnected</span>
+            <div style="display:flex;align-items:center;gap:18px;">
+                <div class="user-badge" id="userBadge" style="display:none">
+                    <span style="color:var(--muted)">📞</span>
+                    <span class="user-phone" id="userPhoneLabel"></span>
+                </div>
+                <button class="logout-btn" id="logoutBtn" style="display:none" onclick="doLogout()">
+                    ✕&nbsp;Logout
+                </button>
+                <div class="header-status">
+                    <div class="status-dot" id="connDot"></div>
+                    <span id="connLabel">Disconnected</span>
+                </div>
             </div>
         </header>
 
@@ -1147,6 +1380,8 @@
         let sessionStart = null, durTimer = null;
         let msgCount = 0, toolCount = 0, packetCount = 0, commitCount = 0;
         let _droppedAI = 0, _droppedVAD = 0, _sentToServer = 0;
+        let loggedInUserPhone = null;
+        let apptRefreshInterval = null;
 
         // ── Audio queue ───────────────────────────────────────────────────────
         // Chunks arrive one at a time from the backend as each TTS call completes.
@@ -1261,6 +1496,14 @@
         const ctx2d = canvas.getContext('2d');
         const commitBar = document.getElementById('commitBar');
         const commitBarFill = document.getElementById('commitBarFill');
+        const loginOverlay = document.getElementById('loginOverlay');
+        const loginPhoneInput = document.getElementById('loginPhone');
+        const loginNameInput = document.getElementById('loginName');
+        const userBadge = document.getElementById('userBadge');
+        const userPhoneLabel = document.getElementById('userPhoneLabel');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const apptListEl = document.getElementById('apptList');
+
 
         // ── Silence commit helpers ────────────────────────────────────────────
         function onPartialTranscript(text) {
@@ -1369,13 +1612,27 @@
 
         // ── WebSocket & Mic ───────────────────────────────────────────────────
         async function startStreaming() {
-            dbg('[WS]', `Opening ws://${window.location.host}/ws/voice`);
-            socket = new WebSocket(`ws://${window.location.host}/ws/voice`);
+            if (!loggedInUserPhone) {
+                showToast('Please log in first.', 'error');
+                showLoginOverlay();
+                return;
+            }
+            const wsUrl = `ws://${window.location.host}/ws/voice?phone_number=${encodeURIComponent(loggedInUserPhone)}`;
+            dbg('[WS]', `Opening ${wsUrl}`);
+            socket = new WebSocket(wsUrl);
             socket.binaryType = 'arraybuffer';
             document.getElementById('wsEndpoint').textContent = '/ws/voice';
             document.getElementById('statSession').textContent = `ses_${Date.now().toString(36)}`;
 
-            socket.onopen = () => { dbg('[WS]', 'CONNECTED'); setConn(true); };
+            socket.onopen = () => {
+                dbg('[WS]', 'CONNECTED'); setConn(true);
+                const phone = localStorage.getItem("phone_number");
+
+                socket.send(JSON.stringify({
+                    type: "set_user",
+                    phone_number: phone
+                }));
+            };
             socket.onclose = (ev) => { dbg('[WS]', `CLOSED code=${ev.code}`); setConn(false); stopMic(); };
             socket.onerror = () => { showToast('WebSocket error', 'error'); };
 
@@ -1404,7 +1661,11 @@
                 if (data.type === 'tool_call') {
                     const st = data.status === 'running' ? 'running' : data.status === 'ok' ? 'ok' : 'err';
                     logTool(data.name, st, data.observation || '');
-                    if (data.status === 'ok' && data.name === 'book_appointment') logAppointment();
+                    // Refresh DB appointments after any successful calendar action
+                    const calendarOps = ['book_appointment', 'cancel_appointment', 'reschedule_appointment'];
+                    if (data.status === 'ok' && calendarOps.includes(data.name)) {
+                        fetchAndRenderAppointments();
+                    }
                 }
 
                 // ── ai_text: full reply text arrives before audio ─────────────
@@ -1508,6 +1769,11 @@
         }
 
         async function toggleMic() {
+            if (!loggedInUserPhone) {
+                showToast('Please log in first.', 'error');
+                showLoginOverlay();
+                return;
+            }
             if (!audioContext) audioContext = new AudioContext({ sampleRate: settings.sampleRate });
             if (audioContext.state === 'suspended') await audioContext.resume();
             if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -1565,14 +1831,48 @@
             toolLogEl.scrollTop = toolLogEl.scrollHeight;
         }
 
-        function logAppointment() {
-            const el = document.getElementById('apptList');
-            if (el.children[0] && !el.children[0].classList.contains('appt-item')) el.innerHTML = '';
-            const now = new Date();
-            const div = document.createElement('div');
-            div.className = 'appt-item';
-            div.innerHTML = `<div class="time">${now.toLocaleDateString()} ${now.toLocaleTimeString()}</div><div class="name">New Appointment</div><span class="tag">Booked</span>`;
-            el.prepend(div);
+        async function fetchAndRenderAppointments() {
+            if (!loggedInUserPhone) return;
+            apptListEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">Loading appointments...</div>';
+            try {
+                const resp = await fetch(`/appointments/${encodeURIComponent(loggedInUserPhone)}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const appts = await resp.json();
+
+                if (appts.length === 0) {
+                    apptListEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments found.</div>';
+                    return;
+                }
+
+                apptListEl.innerHTML = '';
+                appts.forEach(appt => {
+                    const div = document.createElement('div');
+                    div.className = 'appt-item';
+                    const date = new Date(appt.start_time);
+                    const timeStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+                        date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                    const status = appt.status || 'BOOKED';
+                    const statusClass = status.toLowerCase();
+                    div.innerHTML = `<div class="time">${timeStr}</div><div class="name">Appointment</div><span class="tag ${statusClass}">${status}</span>`;
+                    apptListEl.appendChild(div);
+                });
+            } catch (error) {
+                console.error('[DB] Error fetching appointments:', error);
+                apptListEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">Could not load appointments.</div>';
+            }
+        }
+
+        function startAppointmentRefresh() {
+            if (apptRefreshInterval) clearInterval(apptRefreshInterval);
+            apptRefreshInterval = setInterval(fetchAndRenderAppointments, 30000); // Refresh every 30 seconds
+            fetchAndRenderAppointments(); // Initial fetch
+        }
+
+        function stopAppointmentRefresh() {
+            if (apptRefreshInterval) {
+                clearInterval(apptRefreshInterval);
+                apptRefreshInterval = null;
+            }
         }
 
         function b64ToBlob(b64, mime) {
@@ -1651,7 +1951,7 @@
             clearAudioQueue();
             clearChat();
             toolLogEl.innerHTML = '<div style="color:var(--border);">— awaiting tool calls —</div>';
-            document.getElementById('apptList').innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments this session.</div>';
+            apptListEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments this session.</div>';
             toolCount = 0; packetCount = 0; msgCount = 0; commitCount = 0;
             document.getElementById('statTools').textContent = 0;
             document.getElementById('statMsgs').textContent = 0;
@@ -1665,8 +1965,126 @@
             addMessage('ai', 'નમસ્તે! નવો સત્ર શરૂ. હું ફરી મદદ કરવા તૈયાર છું!');
         }
 
-        // ── Init ──────────────────────────────────────────────────────────────
+        // ── Login/Logout Logic ────────────────────────────────────────────────
+        async function doLogin() {
+            const phone = loginPhoneInput.value.trim();
+            const name = loginNameInput.value.trim();
+
+            if (!phone) {
+                showToast('Please enter your phone number.', 'error');
+                return;
+            }
+
+            // Disable button to prevent double-submit
+            const btn = document.getElementById('loginBtn');
+            btn.disabled = true;
+            btn.textContent = 'Connecting…';
+
+            try {
+                // ── Call the backend to register / verify the user ──────────
+                const resp = await fetch('/user/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone_number: phone, name: name || null }),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || `Server error ${resp.status}`);
+                }
+
+                // ── Success: persist and enter the app ──────────────────────
+                localStorage.setItem('phone_number', phone);
+                if (name) localStorage.setItem('user_name', name);
+                loggedInUserPhone = phone;
+                renderUserBadge();
+                hideLoginOverlay();
+                showToast(`Welcome! 📞 ${phone}`, 'success');
+                startAppointmentRefresh();
+
+            } catch (e) {
+                console.error('[LOGIN]', e);
+                showToast(`Login failed: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '→  Continue to Voice Assistant';
+            }
+        }
+
+        function doLogout() {
+            localStorage.removeItem('phone_number');
+            localStorage.removeItem('user_name');
+            loggedInUserPhone = null;
+            renderUserBadge();
+            stopAppointmentRefresh();
+            if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+            stopMic();
+            clearChat();
+            showLoginOverlay();
+            showToast('Logged out.', '');
+        }
+
+        async function checkLoginStatus() {
+            const phone = localStorage.getItem('phone_number');
+            if (!phone) {
+                showLoginOverlay();
+                return;
+            }
+            // Re-validate against backend so the user row definitely exists in DB
+            try {
+                const resp = await fetch('/user/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        phone_number: phone,
+                        name: localStorage.getItem('user_name') || null,
+                    }),
+                });
+                if (!resp.ok) throw new Error('server error');
+                loggedInUserPhone = phone;
+                renderUserBadge();
+                hideLoginOverlay();
+                startAppointmentRefresh();
+            } catch (e) {
+                // If the server is down, still let the user in (graceful degradation)
+                console.warn('[LOGIN] Could not reach /user/login, entering offline mode:', e);
+                loggedInUserPhone = phone;
+                renderUserBadge();
+                hideLoginOverlay();
+                startAppointmentRefresh();
+            }
+        }
+
+
+        function renderUserBadge() {
+            if (loggedInUserPhone) {
+                userPhoneLabel.textContent = loggedInUserPhone;
+                userBadge.style.display = 'flex';
+                logoutBtn.style.display = 'block';
+            } else {
+                userBadge.style.display = 'none';
+                logoutBtn.style.display = 'none';
+            }
+        }
+
+        function showLoginOverlay() {
+            loginOverlay.classList.remove('hidden');
+            loginPhoneInput.value = localStorage.getItem('phone_number') || '';
+            loginNameInput.value = localStorage.getItem('user_name') || '';
+            setTimeout(() => loginPhoneInput.focus(), 100);
+        }
+
+        function hideLoginOverlay() {
+            loginOverlay.classList.add('hidden');
+        }
+
+        function initLoginFlow() {
+            checkLoginStatus();
+        }
+
+        // ── Init ────────────────────────────────────────────────────────────────────
         drawIdleWave();
+        initLoginFlow();
     </script>
 </body>
 
