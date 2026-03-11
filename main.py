@@ -74,7 +74,158 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # chat_sessions maps session_id → {"history": [...], "phone_number": str|None}
 chat_sessions: Dict[str, dict] = {}
-MAX_HISTORY = 5
+MAX_HISTORY = 5  # increased from 5 — avoids context amnesia on longer conversations
+
+# maximum number of iteration llm can make 
+MAX_TOOL_ITERATIONS = 4
+
+# Gujarati number words → digits
+GUJ_NUMBERS = {
+    "એક": 1, "બે": 2, "ત્રણ": 3, "ચાર": 4,
+    "પાંચ": 5, "છ": 6, "સાત": 7, "આઠ": 8,
+    "નવ": 9, "દસ": 10, "અગિયાર": 11, "બાર": 12
+}
+
+# Handle half / quarter / special phrases
+SPECIAL_PHRASES = {
+    "દોઢ": (1, 30),
+    "અઢી": (2, 30),
+}
+
+COMMON_STT_VARIANTS = {
+    "સ્વા": "સવા",
+    "સવા": "સવા",
+    "સાડા": "સાડા",
+    "સાડા": "સાડા",
+    "પોના": "પોણા",
+    "પોણા": "પોણા"
+}
+
+
+
+# ── Noisy STT filter (Fix #2) ──────────────────────────────────────────────────
+import re as _re
+
+def is_noisy_transcript(text: str) -> bool:
+    """
+    Heuristic to detect garbled / low-confidence STT output before it reaches
+    the LLM. Returns True (= noisy, should not be processed as intent) if ANY
+    of the following are true:
+
+      1. Very short after stripping punctuation/spaces (≤ 3 meaningful chars)
+      2. Word repetition: same word appears ≥ 3 times in a short string
+      3. High repetition ratio: > 50 % of tokens are duplicates
+      4. Incomplete / truncated fragments that contain no verb or noun signal
+
+    These patterns appeared directly in the logs (e.g. "ડાયલેક્ટ ડાયલેક્ટ
+    કરી બપોરે બપોરે 3:00 વાગ્યા વાગ્યાની અપ").
+    """
+    stripped = _re.sub(r'[\s.,!?।\u0964]+', ' ', text).strip()
+
+    # Rule 1 — too short to be meaningful
+    if len(stripped) <= 3:
+        return True
+
+    tokens = stripped.split()
+
+    # Rule 2 — any single word repeated 3+ times
+    from collections import Counter
+    counts = Counter(tokens)
+    if any(v >= 3 for v in counts.values()):
+        return True
+
+    # Rule 3 — duplicate tokens make up more than half the message
+    if len(tokens) >= 4:
+        unique = len(set(tokens))
+        if unique / len(tokens) < 0.5:
+            return True
+
+    return False
+
+def normalize_variants(text):
+    for wrong, correct in COMMON_STT_VARIANTS.items():
+        text = text.replace(wrong, correct)
+    return text
+
+def normalize_gujarati_time(text: str) -> str:
+    """
+    Convert Gujarati spoken time phrases into numeric format.
+    Example:
+    'સવા ત્રણ' → '3:15'
+    'સાડા ચાર' → '4:30'
+    'પોણા બે' → '1:45'
+    """
+
+    original_text = text
+
+    # normalize spacing
+    text = text.lower().strip()
+
+    # handle દોઢ / અઢી
+    for phrase, (h, m) in SPECIAL_PHRASES.items():
+        if phrase in text:
+            time_str = f"{h}:{m:02d}"
+            text = text.replace(phrase, time_str)
+
+    text = normalize_variants(text)
+
+    # સવા (quarter past)
+    match = re.search(r"સવા\s*(\w+)", text)
+    if match:
+        hour_word = match.group(1)
+        hour = GUJ_NUMBERS.get(hour_word)
+        if hour:
+            time_str = f"{hour}:{15}"
+            text = text.replace(match.group(0), time_str)
+
+    # સાડા (half past)
+    match = re.search(r"સાડા\s*(\w+)", text)
+    if match:
+        hour_word = match.group(1)
+        hour = GUJ_NUMBERS.get(hour_word)
+        if hour:
+            time_str = f"{hour}:{30}"
+            text = text.replace(match.group(0), time_str)
+
+    # પોણા (quarter to)
+    match = re.search(r"પોણા\s*(\w+)", text)
+    if match:
+        hour_word = match.group(1)
+        hour = GUJ_NUMBERS.get(hour_word)
+        if hour:
+            hour -= 1
+            time_str = f"{hour}:{45}"
+            text = text.replace(match.group(0), time_str)
+
+    return text
+
+# ── Fallback message selector (Fix #7) ────────────────────────────────────────
+def _get_fallback_message(exc: Exception) -> str:
+    """
+    Maps known exception types to a polite Gujarati fallback phrase that is
+    spoken aloud to the user instead of silence.
+    """
+    err_str = str(exc).lower()
+    if "rate_limit" in err_str or "429" in err_str or "tokens per day" in err_str:
+        return (
+            "માફ કરશો, અત્યારે સર્વર ખૂબ વ્યસ્ત છે. "
+            "થોડી વાર પછી ફરી પ્રયત્ન કરો."
+        )
+    if "timeout" in err_str or "timed out" in err_str:
+        return (
+            "માફ કરશો, જવાબ આવવામાં વધુ સમય લાગ્યો. "
+            "કૃપા કરી ફરી પ્રયત્ન કરો."
+        )
+    if "connection" in err_str or "network" in err_str:
+        return (
+            "નેટવર્ક સમસ્યા આવી. "
+            "કૃપા કરી ઇન્ટરનેટ તપાસો અને ફરી બોલો."
+        )
+    # Generic fallback
+    return (
+        "માફ કરશો, કંઈક ભૂલ થઈ. "
+        "થોડી વાર પછી ફરી પ્રયત્ન કરો."
+    )
 
 
 # ── REST endpoints ──────────────────────────────────────────────────────────
@@ -206,7 +357,28 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     today = t0.strftime("%Y-%m-%d")
     day   = t0.strftime("%A")
 
+    # normalize Gujarati time phrases
+    log("[NORMALIZER]", f"Before: {user_text}")
+    user_text = normalize_gujarati_time(user_text)
+    log("[NORMALIZER]", f"After: {user_text}")
+
     log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}'")
+
+    # ── Fix #2: Handle noisy/garbled STT — respond with clarification, skip tools ──
+    if user_text == "__UNCLEAR__":
+        clarification = "માફ કરશો, મને સ્પષ્ટ સંભળાયું નહીં. શું તમે ફરીથી કહી શકો?"
+        log("[BRAIN]", "Noisy input — sending clarification without LLM call")
+        sentences = split_into_sentences(clarification)
+        await websocket.send_json({"type": "ai_text", "text": clarification, "chunk_count": len(sentences)})
+        await websocket.send_json({"type": "ai_speaking_start"})
+        for idx, sentence in enumerate(sentences):
+            audio_b64 = await tts_convert(sentence)
+            await websocket.send_json({
+                "type": "audio_chunk", "index": idx, "total": len(sentences),
+                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+            })
+        await websocket.send_json({"type": "tts_done"})
+        return
 
     # Initialise or retrieve session metadata.
     # NOTE: The WS handler pre-creates the session with empty history so the
@@ -250,6 +422,11 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     tool_iteration = 0
     while ai_msg.tool_calls:
         tool_iteration += 1
+
+        if tool_iteration > MAX_TOOL_ITERATIONS:
+                log("[TOOLS]", f"Max tool iterations reached ({MAX_TOOL_ITERATIONS}). Forcing AI response.")
+                break
+
         log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
 
@@ -310,6 +487,14 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     # Sequential (not parallel) keeps audio in correct order without any
     # reordering logic on the frontend. Each chunk takes ~2 s; the user
     # hears chunk 1 before chunk 2 is even generated.
+    #
+    # FIX: Tell the frontend (and backend ai_speaking gate) that the AI is
+    # about to speak BEFORE we begin generating TTS.  This closes the race
+    # window where the brain_consumer lock releases (un-muting the mic) while
+    # TTS generation is still running and audio has not yet reached the client.
+    await websocket.send_json({"type": "ai_speaking_start"})
+    log("[TTS]", "ai_speaking_start sent — mic MUTED while TTS generates")
+
     t_tts_total = datetime.now()
     for idx, sentence in enumerate(sentences):
         t_chunk = datetime.now()
@@ -370,7 +555,15 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                 log("[AUDIO_TASK]", "browser_to_sarvam() started")
                 try:
                     while True:
-                        msg = await websocket.receive()
+                        
+                        try:
+                            msg = await websocket.receive()
+                        except WebSocketDisconnect:
+                            log("[AUDIO_TASK]", "Client disconnected")
+                            break  
+                        except RuntimeError:
+                            log("[AUDIO_TASK]", "Receive after disconnect — stopping")
+                            break
 
                         if "text" in msg:
                             try:
@@ -388,7 +581,16 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                                     text = ctrl.get("text", "").strip()
                                     if text:
                                         log("[COMMIT]", f"Frontend committed: '{text}'")
-                                        await commit_queue.put(text)
+                                        # Drop commits that arrive while the AI is
+                                        # speaking — these are speaker bleed captured by
+                                        # the mic before the frontend mute took effect.
+                                        if ai_speaking.is_set():
+                                            log("[COMMIT]", f"DROPPED (AI speaking — bleed protection): '{text}'")
+                                        elif is_noisy_transcript(text):
+                                            log("[COMMIT]", f"DROPPED (noisy/garbled STT — will ask clarification): '{text}'")
+                                            await commit_queue.put("__UNCLEAR__")
+                                        else:
+                                            await commit_queue.put(text)
                                 elif ctrl_type == "set_user":
                                     # Frontend can also send phone via WS message as backup
                                     phone = ctrl.get("phone_number")
@@ -406,8 +608,29 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                             raw = msg["bytes"]
                             if ai_speaking.is_set():
                                 _drop_ai += 1
+                                # DIAGNOSTIC: log every dropped packet's RMS so we know
+                                # how much AI audio is being successfully blocked
+                                if _drop_ai <= 5 or _drop_ai % 20 == 0:
+                                    rms = compute_rms(raw)
+                                    log("[DIAG:DROP]", f"AI-speaking drop #{_drop_ai} | rms={rms:.0f}")
                                 continue
                             try:
+                                rms_val = compute_rms(raw)
+                                # DIAGNOSTIC: log the first 5 packets after AI stops speaking
+                                # to see if residual AI audio is leaking into Sarvam's stream
+                                packets_after_unmute = _sent - getattr(browser_to_sarvam, '_sent_at_unmute', _sent)
+                                if not ai_speaking.is_set() and _drop_ai > 0:
+                                    # Just transitioned from dropping to sending
+                                    if not hasattr(browser_to_sarvam, '_unmute_logged'):
+                                        browser_to_sarvam._unmute_logged = True
+                                        browser_to_sarvam._sent_at_unmute = _sent
+                                        log("[DIAG:UNMUTE]", f"First pkt sent after AI stop | rms={rms_val:.0f} | total_dropped={_drop_ai}")
+                                    elif (_sent - browser_to_sarvam._sent_at_unmute) <= 5:
+                                        log("[DIAG:UNMUTE]", f"Early pkt #{_sent - browser_to_sarvam._sent_at_unmute} post-unmute | rms={rms_val:.0f} ({'SPEECH' if rms_val > 300 else 'silence'})")
+                                if ai_speaking.is_set() == False and _drop_ai > 0:
+                                    browser_to_sarvam._unmute_logged = False
+                                    _drop_ai = 0  # reset after logging
+
                                 await sarvam_ws.transcribe(
                                     audio=base64.b64encode(raw).decode("utf-8")
                                 )
@@ -436,10 +659,22 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                         is_final   = getattr(response.data, 'is_final', False)
                         if not transcript:
                             continue
+
+                        # ── DIAGNOSTIC: log AI speaking state alongside every transcript ──
+                        speaking_state = "AI_SPEAKING" if ai_speaking.is_set() else "user_turn"
+                        tag = "FINAL" if is_final else "partial"
+                        log("[DIAG:STT]", f"{tag} [{speaking_state}]: '{transcript}'")
+
                         if is_final:
                             f_count += 1
                             log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
-                            await commit_queue.put(transcript)
+                            if ai_speaking.is_set():
+                                log("[STT_RECV]", f"FINAL DROPPED (AI speaking — bleed): '{transcript}'")
+                            elif is_noisy_transcript(transcript):
+                                log("[STT_RECV]", f"FINAL DROPPED (noisy): '{transcript}'")
+                                await commit_queue.put("__UNCLEAR__")
+                            else:
+                                await commit_queue.put(transcript)
                         else:
                             p_count += 1
                             if p_count % 5 == 1:
@@ -467,6 +702,24 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                                 await run_brain(session_id, sentence, websocket)
                             except Exception as e:
                                 log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
+                                # ── Fix #7: Send a graceful Gujarati fallback instead of silence ──
+                                fallback_text = _get_fallback_message(e)
+                                log("[BRAIN_CONSUMER]", f"Sending fallback TTS: '{fallback_text}'")
+                                try:
+                                    await websocket.send_json({
+                                        "type": "ai_text",
+                                        "text": fallback_text,
+                                        "chunk_count": 1
+                                    })
+                                    await websocket.send_json({"type": "ai_speaking_start"})
+                                    audio_b64 = await tts_convert(fallback_text)
+                                    await websocket.send_json({
+                                        "type": "audio_chunk", "index": 0, "total": 1,
+                                        "text": fallback_text, "audio": audio_b64, "is_last": True
+                                    })
+                                    await websocket.send_json({"type": "tts_done"})
+                                except Exception as tts_err:
+                                    log("[BRAIN_CONSUMER]", f"Fallback TTS also failed: {tts_err}")
                                 continue
                             log("[BRAIN_CONSUMER]", "Lock RELEASED")
                     except asyncio.CancelledError:

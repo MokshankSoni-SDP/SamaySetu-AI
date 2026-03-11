@@ -1384,13 +1384,14 @@
         let apptRefreshInterval = null;
 
         // ── Audio queue ───────────────────────────────────────────────────────
-        // Chunks arrive one at a time from the backend as each TTS call completes.
-        // We enqueue them and play sequentially so the user hears chunk 1 while
-        // chunk 2 is still being generated server-side.
-        let audioQueue = [];      // [{audio: b64, text: str, index: int}]
-        let queuePlaying = false;   // true while an Audio object is playing
-        let aiSpeaking = false;   // true while ANY chunk is playing (used to mute mic)
-        let currentAudio = null;    // the currently-playing Audio object
+        let audioQueue = [];
+        let queuePlaying = false;
+        let aiSpeaking = false;
+        let currentAudio = null;
+        // Each AI response gets a unique ID. onAllChunksDone captures this at
+        // call time and bails out if a newer response has already started —
+        // prevents stale ai_speaking_end from un-muting the mic too early.
+        let currentResponseId = 0;
 
         function enqueueChunk(b64, text, index) {
             audioQueue.push({ audio: b64, text, index });
@@ -1400,9 +1401,8 @@
 
         function playNextChunk() {
             if (audioQueue.length === 0) {
-                // Queue empty — all chunks played
                 queuePlaying = false;
-                onAllChunksDone();
+                onAllChunksDone(currentResponseId);
                 return;
             }
 
@@ -1416,27 +1416,26 @@
 
             currentAudio.onplay = () => {
                 if (!aiSpeaking) {
-                    // First chunk starting — mute mic
                     aiSpeaking = true;
+                    lastPartialTranscript = '';
+                    cancelSilenceTimer();
                     setMicMuteUI(true);
-                    if (socket && socket.readyState === WebSocket.OPEN)
-                        socket.send(JSON.stringify({ type: 'ai_speaking_start' }));
-                    dbg('[QUEUE]', 'First chunk started — mic MUTED, ai_speaking_start sent');
+                    dbg('[QUEUE]', `First chunk playing — mic MUTED (responseId=${currentResponseId})`);
                 }
             };
 
             currentAudio.onended = () => {
-                URL.revokeObjectURL(url);   // free memory
+                URL.revokeObjectURL(url);
                 currentAudio = null;
                 dbg('[QUEUE]', `Chunk ${index} finished`);
-                playNextChunk();            // play next chunk immediately
+                playNextChunk();
             };
 
             currentAudio.onerror = (e) => {
-                dbg('[QUEUE]', `Chunk ${index} playback error: ${e.target.error?.message}`);
+                dbg('[QUEUE]', `Chunk ${index} error: ${e.target.error?.message}`);
                 URL.revokeObjectURL(url);
                 currentAudio = null;
-                playNextChunk();            // skip broken chunk, keep going
+                playNextChunk();
             };
 
             currentAudio.play().catch(e => {
@@ -1445,9 +1444,17 @@
             });
         }
 
-        function onAllChunksDone() {
-            // Called once every chunk for this response has finished playing
+        function onAllChunksDone(responseId) {
+            // Stale check: if a new response already started, don't un-mute
+            if (responseId !== currentResponseId) {
+                dbg('[QUEUE]', `⚠ Stale onAllChunksDone (id=${responseId} vs current=${currentResponseId}) — SKIPPED`);
+                return;
+            }
+            const t = performance.now().toFixed(1);
+            dbg('[DIAG:DONE]', `onAllChunksDone at t=${t}ms | responseId=${responseId} — un-muting mic`);
             aiSpeaking = false;
+            lastPartialTranscript = '';
+            cancelSilenceTimer();
             setMicMuteUI(false);
             if (socket && socket.readyState === WebSocket.OPEN)
                 socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
@@ -1458,8 +1465,7 @@
         }
 
         function clearAudioQueue() {
-            // Interrupt playback and drain queue (e.g. on session reset)
-            if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+            if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
             audioQueue = [];
             queuePlaying = false;
             if (aiSpeaking) {
@@ -1553,6 +1559,14 @@
 
         function commitTranscript(text, source) {
             if (!text || !text.trim()) return;
+            // FIX: hard guard — never commit while the AI is speaking.
+            // This catches any bleed that survived the silence-timer cancellation.
+            if (aiSpeaking) {
+                dbg('[COMMIT]', `SUPPRESSED (AI speaking): '${text}'`);
+                lastPartialTranscript = '';
+                cancelSilenceTimer();
+                return;
+            }
             lastPartialTranscript = '';
             speechDetected = false;
             cancelSilenceTimer();
@@ -1681,6 +1695,22 @@
                     clearAudioQueue();
                 }
 
+                // ── ai_speaking_start from backend: mute mic early, before audio arrives ─
+                if (data.type === 'ai_speaking_start') {
+                    currentResponseId++;
+                    const t = performance.now().toFixed(1);
+                    dbg('[DIAG:CTRL]', `ai_speaking_start at t=${t}ms | newResponseId=${currentResponseId} | aiSpeaking was=${aiSpeaking} | queueLen=${audioQueue.length}`);
+                    // Stop any in-flight audio from prior response immediately
+                    if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
+                    audioQueue = [];
+                    queuePlaying = false;
+                    aiSpeaking = true;
+                    lastPartialTranscript = '';
+                    cancelSilenceTimer();
+                    setMicMuteUI(true);
+                    dbg('[CTRL]', `ai_speaking_start — mic MUTED (responseId=${currentResponseId})`);
+                }
+
                 // ── audio_chunk: one TTS sentence chunk ───────────────────────
                 // Enqueue immediately — playback starts as soon as chunk 0 arrives.
                 // Subsequent chunks arrive while chunk 0 is playing.
@@ -1720,8 +1750,42 @@
 
             _droppedAI = 0; _droppedVAD = 0; _sentToServer = 0;
 
+            // ── DIAGNOSTIC: track state transitions with timestamps ───────────
+            let _lastAiSpeakingState = false;
+            let _aiSpeakingSetAt = null;
+            let _aiSpeakingClearedAt = null;
+            let _bleedPacketCount = 0;   // packets sent in the ~1 bleed window after AI starts
+            let _firstUserPktAfterUnmute = null;  // timestamp of 1st user packet after unmute
+            let _pktsSinceUnmute = 0;
+
             processor.onaudioprocess = (e) => {
-                if (aiSpeaking) { _droppedAI++; return; }
+                const now = performance.now();
+
+                // ── DIAGNOSTIC: detect the exact moment aiSpeaking flips ──────
+                if (aiSpeaking !== _lastAiSpeakingState) {
+                    if (aiSpeaking) {
+                        _aiSpeakingSetAt = now;
+                        _bleedPacketCount = 0;
+                        dbg('[DIAG:MIC]', `⬆ aiSpeaking SET at t=${now.toFixed(1)}ms — mic should be dropping from here`);
+                    } else {
+                        _aiSpeakingClearedAt = now;
+                        _pktsSinceUnmute = 0;
+                        _firstUserPktAfterUnmute = null;
+                        const duration = _aiSpeakingSetAt ? (now - _aiSpeakingSetAt).toFixed(0) : '?';
+                        dbg('[DIAG:MIC]', `⬇ aiSpeaking CLEARED at t=${now.toFixed(1)}ms — was muted for ${duration}ms`);
+                    }
+                    _lastAiSpeakingState = aiSpeaking;
+                }
+
+                if (aiSpeaking) {
+                    _droppedAI++;
+                    // ── DIAGNOSTIC: log every 10th dropped packet so we can see
+                    //    how long the AI-speaking window lasts in audio-thread time
+                    if (_droppedAI % 10 === 1) {
+                        dbg('[DIAG:DROP]', `Dropped pkt #${_droppedAI} while AI speaking | t=${now.toFixed(1)}ms`);
+                    }
+                    return;
+                }
 
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = new Int16Array(inputData.length);
@@ -1730,6 +1794,15 @@
 
                 const rms = Math.sqrt(pcmData.reduce((s, v) => s + v * v, 0) / pcmData.length);
                 const isSpeech = rms > 300;
+
+                // ── DIAGNOSTIC: track first packets right after unmute ────────
+                // This window is where bleed or residual AI audio gets sent.
+                _pktsSinceUnmute++;
+                if (_pktsSinceUnmute <= 5 && _aiSpeakingClearedAt) {
+                    const msSinceUnmute = (now - _aiSpeakingClearedAt).toFixed(1);
+                    dbg('[DIAG:UNMUTE]', `pkt #${_pktsSinceUnmute} after unmute | rms=${rms.toFixed(0)} | ${isSpeech ? '🔴 SPEECH' : '⬜ silence'} | +${msSinceUnmute}ms since unmute`);
+                }
+                if (_pktsSinceUnmute === 1) _firstUserPktAfterUnmute = now;
 
                 if (isSpeech) {
                     _sentToServer++;

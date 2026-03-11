@@ -129,12 +129,14 @@ def book_appointment(
     availability = check_calendar_availability(start_time_str)
     if "BUSY" in availability:
         return "Error: Slot already occupied."
+    
+    display_summary = f"{summary} - {phone_number}" if phone_number else summary
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     end_dt   = naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event = {
-        'summary': summary,
+        'summary': display_summary,
         'description': 'Booked via SamaySetu Gujarati AI Bot',
         'start': {'dateTime': naive_dt.strftime('%Y-%m-%dT%H:%M:%S'), 'timeZone': 'Asia/Kolkata'},
         'end':   {'dateTime': end_dt.strftime('%Y-%m-%dT%H:%M:%S'),   'timeZone': 'Asia/Kolkata'},
