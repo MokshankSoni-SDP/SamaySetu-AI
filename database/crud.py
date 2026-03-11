@@ -18,6 +18,20 @@ from typing import Optional, List, Dict, Any
 from database.db import get_db_connection
 
 
+def _to_dt(s):
+    """Convert an ISO-format string to a Python datetime so psycopg2 sends
+    it as a proper TIMESTAMP wire type instead of TEXT.
+
+    Without this conversion, psycopg2 passes the string as TEXT and PostgreSQL
+    must do an implicit TEXT→TIMESTAMP cast in the WHERE clause, which can
+    silently produce no match (e.g. when the 'T' separator is not recognised
+    in the connection's DateStyle).
+    """
+    if isinstance(s, datetime):
+        return s
+    return datetime.fromisoformat(s)
+
+
 # ── User operations ─────────────────────────────────────────────────────────
 
 def create_user_if_not_exists(phone_number: str, name: Optional[str] = None) -> Dict[str, Any]:
@@ -125,7 +139,7 @@ def get_calendar_event_id(phone_number: str, start_time: str) -> Optional[str]:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (phone_number, start_time))
+            cur.execute(sql, (phone_number, _to_dt(start_time)))
             row = cur.fetchone()
             return row["calendar_event_id"] if row else None
     finally:
@@ -156,7 +170,7 @@ def update_appointment_status(
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (status, phone_number, start_time))
+            cur.execute(sql, (status, phone_number, _to_dt(start_time)))
             updated = cur.rowcount > 0
             conn.commit()
             return updated
@@ -186,10 +200,81 @@ def update_rescheduled_appointment(
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (new_start_time, new_end_time, new_start_time, phone_number, old_start_time))
+            cur.execute(sql, (
+                _to_dt(new_start_time),
+                _to_dt(new_end_time) if new_end_time else None,
+                _to_dt(new_start_time),
+                phone_number,
+                _to_dt(old_start_time),
+            ))
             updated = cur.rowcount > 0
             conn.commit()
             return updated
+    finally:
+        conn.close()
+
+
+def update_status_by_event_id(calendar_event_id: str, status: str) -> bool:
+    """
+    Updates the status of an appointment matched by its Google Calendar event_id.
+
+    WHY: Matching on calendar_event_id is reliable because it is a unique string key
+    stored verbatim. Matching on start_time (a TIMESTAMP column) can silently fail
+    when psycopg2 passes the Python string and PostgreSQL's implicit cast doesn't
+    match the stored value exactly (e.g. 'T' vs space separator, microseconds etc.).
+
+    status must be one of: 'BOOKED', 'CANCELLED', 'RESCHEDULED'.
+    Returns True if a row was updated.
+    """
+    valid_statuses = {"BOOKED", "CANCELLED", "RESCHEDULED"}
+    if status not in valid_statuses:
+        raise ValueError(f"Invalid status '{status}'. Must be one of {valid_statuses}")
+
+    sql = """
+        UPDATE appointments
+        SET    status = %s
+        WHERE  calendar_event_id = %s
+          AND  status = 'BOOKED';
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (status, calendar_event_id))
+            updated = cur.rowcount > 0
+            conn.commit()
+            if updated:
+                print(f"[DB] Status updated to {status} for event_id={calendar_event_id}")
+            else:
+                print(f"[DB] Warning: no BOOKED row found for event_id={calendar_event_id}")
+            return updated
+    finally:
+        conn.close()
+
+
+def user_owns_appointment(phone_number: str, start_time: str) -> bool:
+    """
+    Returns True ONLY if there is a BOOKED appointment in the DB that belongs
+    to phone_number at start_time.
+
+    Used as a guard in cancel_appointment and reschedule_appointment to prevent
+    User A from cancelling / rescheduling an appointment booked by User B.
+    """
+    sql = """
+        SELECT 1
+        FROM   appointments
+        WHERE  phone_number = %s
+          AND  start_time BETWEEN %s::timestamp - INTERVAL '1 minute'
+                            AND %s::timestamp + INTERVAL '1 minute'
+          AND  status       = 'BOOKED'
+        LIMIT 1;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (phone_number, _to_dt(start_time)))
+            found = cur.fetchone() is not None
+            print(f"[DB] user_owns_appointment({phone_number}, {start_time}) → {found}")
+            return found
     finally:
         conn.close()
 

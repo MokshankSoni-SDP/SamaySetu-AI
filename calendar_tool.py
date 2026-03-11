@@ -14,8 +14,10 @@ try:
     from database.crud import (
         create_appointment,
         update_appointment_status,
+        update_status_by_event_id,
         update_rescheduled_appointment,
         get_calendar_event_id,
+        user_owns_appointment,
     )
     _DB_AVAILABLE = True
 except ImportError:
@@ -172,21 +174,37 @@ def find_event_id(start_time_str: str):
     return events[0]['id'] if events else None
 
 def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
-    """Deletes an appointment at the given start time. Prefers stored event_id from DB."""
-    # Prefer the stored event_id from DB (faster than a Calendar list call)
+    """Deletes an appointment at the given start time.
+
+    User-isolation guard: if a phone_number is known, the DB must confirm a
+    BOOKED appointment exists for THAT user before we touch Google Calendar.
+    This prevents User B from cancelling an appointment owned by User A.
+    """
+
+    if is_past_time(start_time_str):
+        return "Error: Cannot cancel a past appointment."
+
+    # ── 1. Ownership check (DB guard) ─────────────────────────────────────────
+    if phone_number:
+        owns = _try_db(user_owns_appointment, phone_number, start_time_str)
+        if not owns:  # False = checked DB and found nothing; None = DB unavailable
+            return (f"Error: No appointment found for your account at {start_time_str}. "
+                    "Please check the time and try again.")
+
+    # ── 2. Get the Google Calendar event_id ──────────────────────────────────
     event_id = None
     if phone_number:
         event_id = _try_db(get_calendar_event_id, phone_number, start_time_str)
+    # if not event_id:
+    #     event_id = find_event_id(start_time_str)   # fallback: search calendar
     if not event_id:
-        event_id = find_event_id(start_time_str)   # fallback to Calendar API lookup
-    if not event_id:
-        return f"Error: No appointment found at {start_time_str} to cancel."
+        return f"Error: No calendar event found at {start_time_str} to cancel."
 
+    # ── 3. Delete from Google Calendar ───────────────────────────────────────
     service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
 
-    # ── DB write: mark appointment CANCELLED ───────────────────────────────
-    if phone_number:
-        _try_db(update_appointment_status, phone_number, start_time_str, "CANCELLED")
+    # ── 4. Update DB status (match by event_id — avoids TIMESTAMP cast issues)
+    _try_db(update_status_by_event_id, event_id, "CANCELLED")
 
     return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
 
@@ -196,22 +214,37 @@ def reschedule_appointment(
     duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
     phone_number: Optional[str] = None,
 ):
-    """Moves an appointment from an old time to a new time. Prefers stored event_id from DB."""
-    # Prefer the stored event_id from DB (faster)
+    """Moves an appointment from an old time to a new time.
+
+    User-isolation guard: same as cancel_appointment — DB must confirm ownership
+    before any Google Calendar operation is attempted.
+    """
+
+    if is_past_time(new_start_time_str):
+        return "Error: Cannot reschedule to a past time."
+
+    # ── 1. Ownership check (DB guard) ─────────────────────────────────────────
+    if phone_number:
+        owns = _try_db(user_owns_appointment, phone_number, old_start_time_str)
+        if not owns:
+            return (f"Error: No appointment found for your account at {old_start_time_str}. "
+                    "Please check the time and try again.")
+
+    # ── 2. Get the Google Calendar event_id ──────────────────────────────────
     event_id = None
     if phone_number:
         event_id = _try_db(get_calendar_event_id, phone_number, old_start_time_str)
-    if not event_id:
-        event_id = find_event_id(old_start_time_str)  # fallback
+    # if not event_id:
+    #     event_id = find_event_id(old_start_time_str)  # fallback
     if not event_id:
         return f"Error: No appointment found at {old_start_time_str}."
 
-    # Check if the NEW slot is free
+    # ── 3. Check new slot is free ─────────────────────────────────────────────
     availability = check_calendar_availability(new_start_time_str)
     if "BUSY" in availability:
         return f"Error: The new slot {new_start_time_str} is already occupied."
 
-    # Get existing event to keep the summary/description
+    # ── 4. Update Google Calendar event ──────────────────────────────────────
     event = service.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
 
     new_naive_dt = datetime.datetime.fromisoformat(new_start_time_str)
@@ -222,7 +255,7 @@ def reschedule_appointment(
 
     service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
 
-    # ── DB write: update appointment times and mark RESCHEDULED ───────────
+    # ── 5. Update DB: new times + RESCHEDULED status ──────────────────────────
     if phone_number:
         _try_db(
             update_rescheduled_appointment,
