@@ -191,8 +191,7 @@ def update_rescheduled_appointment(
     sql = """
         UPDATE appointments
         SET start_time = %s,
-            end_time   = COALESCE(%s, end_time + (%s::timestamp - start_time)),
-            status     = 'RESCHEDULED'
+            end_time   = COALESCE(%s, end_time + (%s::timestamp - start_time))
         WHERE phone_number = %s
           AND start_time   = %s
           AND status       = 'BOOKED';
@@ -271,7 +270,7 @@ def user_owns_appointment(phone_number: str, start_time: str) -> bool:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (phone_number, _to_dt(start_time)))
+            cur.execute(sql, (phone_number, _to_dt(start_time), _to_dt(start_time)))
             found = cur.fetchone() is not None
             print(f"[DB] user_owns_appointment({phone_number}, {start_time}) → {found}")
             return found

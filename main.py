@@ -531,8 +531,47 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
     """Voice WebSocket. Accepts optional ?phone_number=... query param to associate
     the session with a logged-in user so calendar ops can write to the DB."""
     await websocket.accept()
+
+    # """નમસ્તે! તમે સમયસેતુ AI સાથે જોડાયા છો.  
+    #     કૃપા કરીને જણાવશો કે તમને એપોઇન્ટમેન્ટ માટે કયો દિવસ અને સમય અનુકૂળ છે?
+    #     """
+
     session_id = f"web_{datetime.now().strftime('%H%M%S')}"
     log("[WS]", f"Connection ACCEPTED | session_id='{session_id}' | phone='{phone_number}'")
+
+    greeting_text = """નમસ્તે! તમે સમયસેતુ AI સાથે જોડાયા છો.  
+        કૃપા કરીને જણાવશો કે તમને એપોઇન્ટમેન્ટ માટે કયો દિવસ અને સમય અનુકૂળ છે?
+        """
+    
+    # ── Play greeting once when connection starts ──
+    try:
+        sentences = split_into_sentences(greeting_text)
+
+        await websocket.send_json({
+            "type": "ai_text",
+            "text": greeting_text,
+            "chunk_count": len(sentences)
+        })
+
+        await websocket.send_json({"type": "ai_speaking_start"})
+
+        for idx, sentence in enumerate(sentences):
+            audio_b64 = await tts_convert(sentence)
+
+            await websocket.send_json({
+                "type": "audio_chunk",
+                "index": idx,
+                "total": len(sentences),
+                "text": sentence,
+                "audio": audio_b64,
+                "is_last": idx == len(sentences) - 1
+            })
+
+        await websocket.send_json({"type": "tts_done"})
+
+    except Exception as e:
+        log("[GREETING]", f"TTS greeting failed: {e}")
+
     # Store phone_number in session so run_brain() can pass it to calendar tools
     chat_sessions[session_id] = {"history": [], "phone_number": phone_number}
 
