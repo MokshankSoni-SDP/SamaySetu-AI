@@ -525,254 +525,344 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     await websocket.send_json({"type": "tts_done"})
 
 
+# ── Silence warm-up for Sarvam STT ────────────────────────────────────────────
+# 4096 zero int16 samples = 256 ms of silence at 16 kHz.
+# Sending several of these right after a new Sarvam connection primes its
+# acoustic model so the very first real utterance comes back clean instead of
+# producing the "નમસ્કાર × 40" cold-start loop we saw in the logs.
+_SILENCE_FRAME_B64 = base64.b64encode(bytes(4096 * 2)).decode("utf-8")
+_WARMUP_FRAMES = 10   # 10 × 256 ms ≈ 2.5 s — enough to stabilise saaras:v3
+
+async def _warmup_sarvam(sarvam_ws, label: str):
+    log("[STT_WARMUP]", f"{label} — priming Sarvam with {_WARMUP_FRAMES} silence frames")
+    for i in range(_WARMUP_FRAMES):
+        try:
+            await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
+            await asyncio.sleep(0.04)   # ~40 ms gap so Sarvam processes each frame
+        except Exception as e:
+            log("[STT_WARMUP]", f"Frame {i+1} failed: {e}")
+            return False
+    log("[STT_WARMUP]", f"{label} — warm-up done")
+    return True
+
+
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @app.websocket("/ws/voice")
 async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] = None):
-    """Voice WebSocket. Accepts optional ?phone_number=... query param to associate
-    the session with a logged-in user so calendar ops can write to the DB."""
+    """
+    Voice WebSocket endpoint.
+
+    Architecture:
+      browser_to_sarvam  — reads PCM from browser, handles control msgs,
+                           pushes raw bytes into audio_buf queue
+      sarvam_sender      — pulls from audio_buf, forwards to Sarvam STT.
+                           Automatically reconnects if Sarvam drops the WS.
+                           Each new Sarvam connection is primed with silence
+                           so the first user utterance transcribes cleanly.
+      brain_consumer     — reads committed text from commit_queue, calls LLM+TTS
+
+    Why audio_buf queue? Decouples browser receipt from Sarvam forwarding so
+    reconnects are invisible to the browser task.
+    """
     await websocket.accept()
-
-    # """નમસ્તે! તમે સમયસેતુ AI સાથે જોડાયા છો.  
-    #     કૃપા કરીને જણાવશો કે તમને એપોઇન્ટમેન્ટ માટે કયો દિવસ અને સમય અનુકૂળ છે?
-    #     """
-
     session_id = f"web_{datetime.now().strftime('%H%M%S')}"
     log("[WS]", f"Connection ACCEPTED | session_id='{session_id}' | phone='{phone_number}'")
-
-    greeting_text = """નમસ્તે! તમે સમયસેતુ AI સાથે જોડાયા છો.  
-        કૃપા કરીને જણાવશો કે તમને એપોઇન્ટમેન્ટ માટે કયો દિવસ અને સમય અનુકૂળ છે?
-        """
-    
-    # ── Play greeting once when connection starts ──
-    try:
-        sentences = split_into_sentences(greeting_text)
-
-        await websocket.send_json({
-            "type": "ai_text",
-            "text": greeting_text,
-            "chunk_count": len(sentences)
-        })
-
-        await websocket.send_json({"type": "ai_speaking_start"})
-
-        for idx, sentence in enumerate(sentences):
-            audio_b64 = await tts_convert(sentence)
-
-            await websocket.send_json({
-                "type": "audio_chunk",
-                "index": idx,
-                "total": len(sentences),
-                "text": sentence,
-                "audio": audio_b64,
-                "is_last": idx == len(sentences) - 1
-            })
-
-        await websocket.send_json({"type": "tts_done"})
-
-    except Exception as e:
-        log("[GREETING]", f"TTS greeting failed: {e}")
-
-    # Store phone_number in session so run_brain() can pass it to calendar tools
     chat_sessions[session_id] = {"history": [], "phone_number": phone_number}
 
-    brain_lock  = asyncio.Lock()
-    ai_speaking = asyncio.Event()
+    brain_lock   = asyncio.Lock()
+    ai_speaking  = asyncio.Event()
+    commit_queue: asyncio.Queue = asyncio.Queue()
+    # audio_buf holds raw PCM bytes from the browser.
+    # browser_to_sarvam writes; sarvam_sender reads.
+    # It survives Sarvam reconnects — no audio is ever lost.
+    audio_buf: asyncio.Queue = asyncio.Queue(maxsize=300)
 
-    log("[WS]", "Opening Sarvam STT streaming connection (saaras:v3, gu-IN, 16000 Hz)")
-    try:
-        async with client_stt.speech_to_text_streaming.connect(
-            model="saaras:v3", language_code="gu-IN", sample_rate=16000
-        ) as sarvam_ws:
-            log("[WS]", "Sarvam STT connection ESTABLISHED")
+    _recv = _drop_ai = _sent = 0
 
-            _recv = _drop_ai = _sent = 0
-            commit_queue: asyncio.Queue = asyncio.Queue()
-
-            # ── Task 1: Browser audio → Sarvam STT ───────────────────────────
-            async def browser_to_sarvam():
-                nonlocal _recv, _drop_ai, _sent
-                log("[AUDIO_TASK]", "browser_to_sarvam() started")
+    # ── Task 1: Browser WebSocket → audio_buf + control messages ─────────────
+    async def browser_to_sarvam():
+        nonlocal _recv, _drop_ai, _sent
+        log("[AUDIO_TASK]", "browser_to_sarvam() started")
+        try:
+            while True:
                 try:
-                    while True:
-                        
-                        try:
-                            msg = await websocket.receive()
-                        except WebSocketDisconnect:
-                            log("[AUDIO_TASK]", "Client disconnected")
-                            break  
-                        except RuntimeError:
-                            log("[AUDIO_TASK]", "Receive after disconnect — stopping")
-                            break
+                    msg = await websocket.receive()
+                except (WebSocketDisconnect, RuntimeError) as e:
+                    log("[AUDIO_TASK]", f"Browser disconnected: {e}")
+                    break
 
-                        if "text" in msg:
-                            try:
-                                ctrl      = json.loads(msg["text"])
-                                ctrl_type = ctrl.get("type", "unknown")
-
-                                if ctrl_type == "ai_speaking_start":
-                                    ai_speaking.set()
-                                    log("[CTRL]", "ai_speaking_start → mic MUTED")
-                                elif ctrl_type == "ai_speaking_end":
-                                    ai_speaking.clear()
-                                    log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | "
-                                        f"recv={_recv} sent={_sent} drop_ai={_drop_ai}")
-                                elif ctrl_type == "commit_transcript":
-                                    text = ctrl.get("text", "").strip()
-                                    if text:
-                                        log("[COMMIT]", f"Frontend committed: '{text}'")
-                                        # Drop commits that arrive while the AI is
-                                        # speaking — these are speaker bleed captured by
-                                        # the mic before the frontend mute took effect.
-                                        if ai_speaking.is_set():
-                                            log("[COMMIT]", f"DROPPED (AI speaking — bleed protection): '{text}'")
-                                        elif is_noisy_transcript(text):
-                                            log("[COMMIT]", f"DROPPED (noisy/garbled STT — will ask clarification): '{text}'")
-                                            await commit_queue.put("__UNCLEAR__")
-                                        else:
-                                            await commit_queue.put(text)
-                                elif ctrl_type == "set_user":
-                                    # Frontend can also send phone via WS message as backup
-                                    phone = ctrl.get("phone_number")
-                                    if phone and session_id in chat_sessions:
-                                        chat_sessions[session_id]["phone_number"] = phone
-                                        log("[WS]", f"User phone updated via set_user: {phone}")
-                                else:
-                                    log("[CTRL]", f"Unknown type='{ctrl_type}'")
-                            except Exception as e:
-                                log("[CTRL]", f"JSON parse error: {e}")
-                            continue
-
-                        if "bytes" in msg:
-                            _recv += 1
-                            raw = msg["bytes"]
-                            if ai_speaking.is_set():
-                                _drop_ai += 1
-                                # DIAGNOSTIC: log every dropped packet's RMS so we know
-                                # how much AI audio is being successfully blocked
-                                if _drop_ai <= 5 or _drop_ai % 20 == 0:
-                                    rms = compute_rms(raw)
-                                    log("[DIAG:DROP]", f"AI-speaking drop #{_drop_ai} | rms={rms:.0f}")
-                                continue
-                            try:
-                                rms_val = compute_rms(raw)
-                                # DIAGNOSTIC: log the first 5 packets after AI stops speaking
-                                # to see if residual AI audio is leaking into Sarvam's stream
-                                packets_after_unmute = _sent - getattr(browser_to_sarvam, '_sent_at_unmute', _sent)
-                                if not ai_speaking.is_set() and _drop_ai > 0:
-                                    # Just transitioned from dropping to sending
-                                    if not hasattr(browser_to_sarvam, '_unmute_logged'):
-                                        browser_to_sarvam._unmute_logged = True
-                                        browser_to_sarvam._sent_at_unmute = _sent
-                                        log("[DIAG:UNMUTE]", f"First pkt sent after AI stop | rms={rms_val:.0f} | total_dropped={_drop_ai}")
-                                    elif (_sent - browser_to_sarvam._sent_at_unmute) <= 5:
-                                        log("[DIAG:UNMUTE]", f"Early pkt #{_sent - browser_to_sarvam._sent_at_unmute} post-unmute | rms={rms_val:.0f} ({'SPEECH' if rms_val > 300 else 'silence'})")
-                                if ai_speaking.is_set() == False and _drop_ai > 0:
-                                    browser_to_sarvam._unmute_logged = False
-                                    _drop_ai = 0  # reset after logging
-
-                                await sarvam_ws.transcribe(
-                                    audio=base64.b64encode(raw).decode("utf-8")
-                                )
-                                _sent += 1
-                                if _sent % 50 == 1:
-                                    rms = compute_rms(raw)
-                                    log("[STT_SEND]", f"pkt#{_sent} | rms={rms:.0f} "
-                                        f"({'speech' if rms > 300 else 'silence'})")
-                            except Exception as e:
-                                log("[STT_SEND]", f"FAILED: {e}")
-
-                except WebSocketDisconnect:
-                    log("[AUDIO_TASK]", f"WS disconnected | recv={_recv} sent={_sent}")
-                except Exception as e:
-                    log("[AUDIO_TASK]", f"Crashed: {e}\n{traceback.format_exc()}")
-
-            # ── Task 2: Sarvam STT → frontend ────────────────────────────────
-            async def sarvam_to_frontend():
-                log("[STT_RECV]", "sarvam_to_frontend() started")
-                try:
-                    p_count = f_count = 0
-                    async for response in sarvam_ws:
-                        if not (hasattr(response, "type") and response.type == "data"):
-                            continue
-                        transcript = getattr(response.data, 'transcript', "").strip()
-                        is_final   = getattr(response.data, 'is_final', False)
-                        if not transcript:
-                            continue
-
-                        # ── DIAGNOSTIC: log AI speaking state alongside every transcript ──
-                        speaking_state = "AI_SPEAKING" if ai_speaking.is_set() else "user_turn"
-                        tag = "FINAL" if is_final else "partial"
-                        log("[DIAG:STT]", f"{tag} [{speaking_state}]: '{transcript}'")
-
-                        if is_final:
-                            f_count += 1
-                            log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
-                            if ai_speaking.is_set():
-                                log("[STT_RECV]", f"FINAL DROPPED (AI speaking — bleed): '{transcript}'")
-                            elif is_noisy_transcript(transcript):
-                                log("[STT_RECV]", f"FINAL DROPPED (noisy): '{transcript}'")
-                                await commit_queue.put("__UNCLEAR__")
-                            else:
-                                await commit_queue.put(transcript)
-                        else:
-                            p_count += 1
-                            if p_count % 5 == 1:
-                                log("[STT_RECV]", f"Partial #{p_count}: '{transcript}'")
-                        await websocket.send_json({
-                            "type": "transcript", "text": transcript, "is_final": is_final
-                        })
-                except Exception as e:
-                    log("[STT_RECV]", f"Crashed: {e}\n{traceback.format_exc()}")
-
-            # ── Task 3: Brain consumer ────────────────────────────────────────
-            async def brain_consumer():
-                log("[BRAIN_CONSUMER]", "Started — waiting for commits")
-                while True:
+                if "text" in msg:
                     try:
-                        sentence = await commit_queue.get()
-                        log("[BRAIN_CONSUMER]", f"Dequeued: '{sentence}'")
-                        if brain_lock.locked():
-                            log("[BRAIN_CONSUMER]", "Brain BUSY — dropping sentence")
-                            continue
-                        async with brain_lock:
-                            log("[BRAIN_CONSUMER]", "Lock ACQUIRED")
-                            await websocket.send_json({"type": "processing_start"})
-                            try:
-                                await run_brain(session_id, sentence, websocket)
-                            except Exception as e:
-                                log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
-                                # ── Fix #7: Send a graceful Gujarati fallback instead of silence ──
-                                fallback_text = _get_fallback_message(e)
-                                log("[BRAIN_CONSUMER]", f"Sending fallback TTS: '{fallback_text}'")
-                                try:
-                                    await websocket.send_json({
-                                        "type": "ai_text",
-                                        "text": fallback_text,
-                                        "chunk_count": 1
-                                    })
-                                    await websocket.send_json({"type": "ai_speaking_start"})
-                                    audio_b64 = await tts_convert(fallback_text)
-                                    await websocket.send_json({
-                                        "type": "audio_chunk", "index": 0, "total": 1,
-                                        "text": fallback_text, "audio": audio_b64, "is_last": True
-                                    })
-                                    await websocket.send_json({"type": "tts_done"})
-                                except Exception as tts_err:
-                                    log("[BRAIN_CONSUMER]", f"Fallback TTS also failed: {tts_err}")
-                                continue
-                            log("[BRAIN_CONSUMER]", "Lock RELEASED")
-                    except asyncio.CancelledError:
-                        log("[BRAIN_CONSUMER]", "Cancelled — exiting")
-                        break
+                        ctrl      = json.loads(msg["text"])
+                        ctrl_type = ctrl.get("type", "unknown")
+                        if ctrl_type == "ai_speaking_start":
+                            ai_speaking.set()
+                            log("[CTRL]", "ai_speaking_start → mic MUTED")
+                        elif ctrl_type == "ai_speaking_end":
+                            ai_speaking.clear()
+                            log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | "
+                                f"recv={_recv} sent={_sent} drop_ai={_drop_ai}")
+                        elif ctrl_type == "commit_transcript":
+                            text = ctrl.get("text", "").strip()
+                            if text:
+                                log("[COMMIT]", f"Frontend committed: '{text}'")
+                                if ai_speaking.is_set():
+                                    log("[COMMIT]", f"DROPPED (AI speaking — bleed): '{text}'")
+                                elif is_noisy_transcript(text):
+                                    log("[COMMIT]", f"DROPPED (noisy STT): '{text}'")
+                                    await commit_queue.put("__UNCLEAR__")
+                                else:
+                                    await commit_queue.put(text)
+                        elif ctrl_type == "set_user":
+                            phone = ctrl.get("phone_number")
+                            if phone and session_id in chat_sessions:
+                                chat_sessions[session_id]["phone_number"] = phone
+                                log("[WS]", f"User phone updated via set_user: {phone}")
+                        else:
+                            log("[CTRL]", f"Unknown ctrl type='{ctrl_type}'")
                     except Exception as e:
-                        log("[BRAIN_CONSUMER]", f"Error: {e}\n{traceback.format_exc()}")
+                        log("[CTRL]", f"JSON parse error: {e}")
+                    continue
 
-            log("[WS]", "Launching 3 async tasks")
-            await asyncio.gather(browser_to_sarvam(), sarvam_to_frontend(), brain_consumer())
-            log("[WS]", "All tasks exited")
+                if "bytes" in msg:
+                    _recv += 1
+                    raw = msg["bytes"]
+                    if ai_speaking.is_set():
+                        _drop_ai += 1
+                        continue
+                    # Push to buffer; if full, drop oldest (avoid memory growth)
+                    try:
+                        audio_buf.put_nowait(raw)
+                    except asyncio.QueueFull:
+                        try:
+                            audio_buf.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        audio_buf.put_nowait(raw)
 
+        except Exception as e:
+            log("[AUDIO_TASK]", f"Crashed: {e}\n{traceback.format_exc()}")
+
+    # ── Task 2: audio_buf → Sarvam STT (with automatic reconnect) ────────────
+    async def sarvam_sender():
+        """
+        Reads PCM from audio_buf and streams to Sarvam.
+        If Sarvam drops the connection (e.g. idle timeout, network blip),
+        this loop catches the crash, waits briefly, opens a fresh Sarvam WS,
+        primes it with silence, and resumes — all without touching the browser WS.
+        """
+        nonlocal _sent
+        reconnect_num = 0
+        MAX_RECONNECTS = 15
+
+        while reconnect_num <= MAX_RECONNECTS:
+            attempt_label = f"conn#{reconnect_num + 1}"
+            log("[STT_SEND]", f"Opening Sarvam STT connection ({attempt_label})")
+            try:
+                async with client_stt.speech_to_text_streaming.connect(
+                    model="saaras:v3", language_code="gu-IN", sample_rate=16000
+                ) as sarvam_ws:
+                    log("[STT_SEND]", f"Sarvam STT ESTABLISHED ({attempt_label})")
+
+                    # ── WARM-UP: send silence to prime acoustic model ──────────
+                    # This is the fix for the "word × 40" cold-start noise.
+                    ok = await _warmup_sarvam(sarvam_ws, attempt_label)
+                    if not ok:
+                        log("[STT_SEND]", "Warm-up failed — will reconnect")
+                        reconnect_num += 1
+                        await asyncio.sleep(1)
+                        continue
+
+                    # Tell frontend STT is live (clears any "reconnecting" UI)
+                    try:
+                        await websocket.send_json({
+                            "type": "stt_ready",
+                            "reconnect_num": reconnect_num
+                        })
+                    except Exception:
+                        pass
+
+                    # Spawn receiver task for this specific connection
+                    recv_task = asyncio.create_task(
+                        _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking)
+                    )
+
+                    try:
+                        # Forward audio → Sarvam until connection dies.
+                        #
+                        # Keep-alive design:
+                        #   We track wall-clock time of the LAST real packet sent.
+                        #   If > KEEPALIVE_INTERVAL seconds pass with no real packet,
+                        #   we send ONE silence frame so Sarvam doesn't idle-close.
+                        #
+                        #   We do NOT use asyncio.wait_for(timeout=30) for this because
+                        #   that 30s clock runs even while the AI is speaking (mic muted,
+                        #   audio_buf empty). The timeout would fire right after unmute —
+                        #   injecting silence frames INTO live user speech and breaking
+                        #   Sarvam's acoustic context. This was the root cause of the
+                        #   word-looping noise seen in the logs.
+                        KEEPALIVE_INTERVAL = 20.0   # seconds between real packets to trigger keep-alive
+                        POLL_INTERVAL      = 0.1    # how often we check the buffer (non-blocking)
+                        last_real_pkt_time = asyncio.get_event_loop().time()
+
+                        while True:
+                            try:
+                                raw = audio_buf.get_nowait()
+                            except asyncio.QueueEmpty:
+                                # Buffer empty — check if keep-alive is needed
+                                now = asyncio.get_event_loop().time()
+                                idle_s = now - last_real_pkt_time
+                                if idle_s >= KEEPALIVE_INTERVAL and not ai_speaking.is_set():
+                                    # Only send keep-alive when mic is live (not while AI speaking).
+                                    # Sending silence while AI speaks would inject it right
+                                    # after unmute when the buffer drains.
+                                    log("[STT_SEND]", f"Keep-alive after {idle_s:.0f}s idle")
+                                    await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
+                                    last_real_pkt_time = now   # reset clock after keep-alive
+                                await asyncio.sleep(POLL_INTERVAL)
+                                continue
+
+                            # Got a real packet
+                            last_real_pkt_time = asyncio.get_event_loop().time()
+                            await sarvam_ws.transcribe(
+                                audio=base64.b64encode(raw).decode("utf-8")
+                            )
+                            _sent += 1
+                            if _sent % 50 == 1:
+                                rms = compute_rms(raw)
+                                log("[STT_SEND]", f"pkt#{_sent} | rms={rms:.0f} "
+                                    f"({'speech' if rms > 300 else 'silence'})")
+
+                    except Exception as e:
+                        log("[STT_SEND]", f"Send loop ended ({attempt_label}): {e}")
+                    finally:
+                        recv_task.cancel()
+                        try:
+                            await recv_task
+                        except asyncio.CancelledError:
+                            pass
+
+            except Exception as e:
+                log("[STT_SEND]", f"Sarvam connect FAILED ({attempt_label}): {e}")
+
+            reconnect_num += 1
+            if reconnect_num <= MAX_RECONNECTS:
+                wait_s = min(2 ** reconnect_num, 16)   # exponential back-off capped at 16 s
+                log("[STT_SEND]", f"Reconnecting in {wait_s}s "
+                    f"(attempt {reconnect_num + 1}/{MAX_RECONNECTS})")
+                try:
+                    await websocket.send_json({
+                        "type": "stt_reconnecting",
+                        "attempt": reconnect_num,
+                        "wait_s": wait_s
+                    })
+                except Exception:
+                    pass
+                await asyncio.sleep(wait_s)
+            else:
+                log("[STT_SEND]", "Max reconnects reached — giving up")
+                try:
+                    await websocket.send_json({"type": "stt_failed"})
+                except Exception:
+                    pass
+
+    # ── Task 2b: Sarvam transcript receiver (one per Sarvam connection) ───────
+    async def _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking):
+        """Reads responses from one Sarvam WS and routes finals to commit_queue."""
+        log("[STT_RECV]", "Receiver started")
+        try:
+            p_count = f_count = 0
+            async for response in sarvam_ws:
+                if not (hasattr(response, "type") and response.type == "data"):
+                    continue
+                transcript = getattr(response.data, 'transcript', "").strip()
+                is_final   = getattr(response.data, 'is_final', False)
+                if not transcript:
+                    continue
+
+                speaking_tag = "AI_SPEAKING" if ai_speaking.is_set() else "user_turn"
+                log("[DIAG:STT]", f"{'FINAL' if is_final else 'partial'} [{speaking_tag}]: '{transcript}'")
+
+                if is_final:
+                    f_count += 1
+                    log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
+                    if ai_speaking.is_set():
+                        log("[STT_RECV]", f"FINAL DROPPED (AI speaking): '{transcript}'")
+                    elif is_noisy_transcript(transcript):
+                        log("[STT_RECV]", f"FINAL DROPPED (noisy): '{transcript}'")
+                        await commit_queue.put("__UNCLEAR__")
+                    else:
+                        await commit_queue.put(transcript)
+                else:
+                    p_count += 1
+                    if p_count % 5 == 1:
+                        log("[STT_RECV]", f"Partial #{p_count}: '{transcript}'")
+
+                try:
+                    await websocket.send_json({
+                        "type": "transcript",
+                        "text": transcript,
+                        "is_final": is_final
+                    })
+                except Exception:
+                    pass   # browser disconnected; sarvam_sender will handle
+
+        except asyncio.CancelledError:
+            log("[STT_RECV]", "Receiver cancelled (Sarvam reconnect in progress)")
+            raise
+        except Exception as e:
+            log("[STT_RECV]", f"Receiver ended: {e}")
+
+    # ── Task 3: Brain consumer ────────────────────────────────────────────────
+    async def brain_consumer():
+        log("[BRAIN_CONSUMER]", "Started — waiting for commits")
+        while True:
+            try:
+                sentence = await commit_queue.get()
+                log("[BRAIN_CONSUMER]", f"Dequeued: '{sentence}'")
+                if brain_lock.locked():
+                    log("[BRAIN_CONSUMER]", "Brain BUSY — dropping sentence")
+                    continue
+                async with brain_lock:
+                    log("[BRAIN_CONSUMER]", "Lock ACQUIRED")
+                    await websocket.send_json({"type": "processing_start"})
+                    try:
+                        await run_brain(session_id, sentence, websocket)
+                    except Exception as e:
+                        log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
+                        fallback_text = _get_fallback_message(e)
+                        log("[BRAIN_CONSUMER]", f"Sending fallback TTS: '{fallback_text}'")
+                        try:
+                            await websocket.send_json({
+                                "type": "ai_text", "text": fallback_text, "chunk_count": 1
+                            })
+                            await websocket.send_json({"type": "ai_speaking_start"})
+                            audio_b64 = await tts_convert(fallback_text)
+                            await websocket.send_json({
+                                "type": "audio_chunk", "index": 0, "total": 1,
+                                "text": fallback_text, "audio": audio_b64, "is_last": True
+                            })
+                            await websocket.send_json({"type": "tts_done"})
+                        except Exception as tts_err:
+                            log("[BRAIN_CONSUMER]", f"Fallback TTS also failed: {tts_err}")
+                        continue
+                    log("[BRAIN_CONSUMER]", "Lock RELEASED")
+            except asyncio.CancelledError:
+                log("[BRAIN_CONSUMER]", "Cancelled — exiting")
+                break
+            except Exception as e:
+                log("[BRAIN_CONSUMER]", f"Error: {e}\n{traceback.format_exc()}")
+
+    log("[WS]", "Launching tasks")
+    try:
+        await asyncio.gather(
+            browser_to_sarvam(),
+            sarvam_sender(),
+            brain_consumer(),
+        )
     except Exception as e:
         log("[WS]", f"Handler CRASHED: {e}\n{traceback.format_exc()}")
+    log("[WS]", "All tasks exited")
 
 
 # ── Audio helpers ──────────────────────────────────────────────────────────────

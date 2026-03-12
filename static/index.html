@@ -1727,13 +1727,47 @@
                 if (data.type === 'tts_done') {
                     dbg('[TTS_DONE]', 'All chunks received from backend');
                 }
+
+                // ── STT reconnect status from backend ─────────────────────────
+                // Sent by sarvam_sender() when the Sarvam WS drops and reconnects.
+                if (data.type === 'stt_reconnecting') {
+                    const msg = `STT reconnecting (attempt ${data.attempt}, wait ${data.wait_s}s)...`;
+                    dbg('[STT]', msg);
+                    setStatus(msg, true);
+                    showToast('STT reconnecting...', 'info');
+                }
+
+                if (data.type === 'stt_ready') {
+                    dbg('[STT]', `STT ready (reconnect #${data.reconnect_num})`);
+                    if (data.reconnect_num > 0) {
+                        setStatus('સાંભળી રહ્યો છું...', true);
+                        showToast('STT reconnected ✓', 'success');
+                    }
+                }
+
+                if (data.type === 'stt_failed') {
+                    dbg('[STT]', 'STT permanently failed — please refresh');
+                    setStatus('STT failed — please refresh', false);
+                    showToast('Voice recognition failed. Please refresh the page.', 'error');
+                }
             };
 
             // ── Mic setup ─────────────────────────────────────────────────────
             dbg('[MIC]', 'Requesting microphone access');
             let stream;
             try {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Disable browser audio processing — raw PCM needed for Sarvam STT.
+                // echoCancellation/noiseSuppression/autoGainControl all modify the
+                // waveform in ways that degrade Sarvam's acoustic model accuracy.
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: settings.sampleRate,
+                        channelCount: 1,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                    }
+                });
                 dbg('[MIC]', 'GRANTED');
             } catch (err) {
                 dbg('[MIC]', `DENIED: ${err}`);
