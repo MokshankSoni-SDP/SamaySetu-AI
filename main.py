@@ -717,6 +717,41 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                         bot_cfg = await asyncio.to_thread(get_bot_config, tenant_id)
                                         chat_sessions[session_id]["bot_config"] = bot_cfg or {}
                                         log("[WS]", f"Bot config loaded for tenant={tenant_id}")
+                                        
+                                        # Trigger greeting if configured
+                                        if bot_cfg and bot_cfg.get("greeting_message"):
+                                            greeting_text = bot_cfg["greeting_message"]
+                                            tts_speaker = bot_cfg.get("tts_speaker", "simran")
+                                            tts_lang = bot_cfg.get("language_code", "gu-IN")
+                                            
+                                            async def play_initial_greeting():
+                                                try:
+                                                    log("[GREETING]", f"Preparing initial greeting: {greeting_text[:30]}...")
+                                                    sentences = split_into_sentences(greeting_text)
+                                                    
+                                                    # Lock the brain during greeting
+                                                    async with brain_lock:
+                                                        await websocket.send_json({
+                                                            "type": "ai_text",
+                                                            "text": greeting_text,
+                                                            "chunk_count": len(sentences)
+                                                        })
+                                                        await websocket.send_json({"type": "ai_speaking_start"})
+                                                        
+                                                        for idx, sentence in enumerate(sentences):
+                                                            audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
+                                                            await websocket.send_json({
+                                                                "type": "audio_chunk", "index": idx, "total": len(sentences),
+                                                                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+                                                            })
+                                                            
+                                                        await websocket.send_json({"type": "tts_done"})
+                                                        log("[GREETING]", "Greeting playback finished")
+                                                except Exception as e:
+                                                    log("[GREETING]", f"Error playing greeting: {e}")
+                                            
+                                            asyncio.create_task(play_initial_greeting())
+                                            
                                     except Exception as cfg_err:
                                         log("[WS]", f"Bot config load failed: {cfg_err}")
                             log("[WS]", f"init | session={session_id} phone={phone_number} tenant={tenant_id}")
