@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SamaySetu — Admin Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0a0c10;--surface:#10141c;--panel:#151a26;--border:#1e2538;
+  --accent:#f5a623;--accent2:#e05c2a;--text:#e8dcc8;--muted:#6b7280;
+  --success:#22c55e;--danger:#ef4444;--info:#60a5fa;--warn:#f59e0b;
+  --glow:rgba(245,166,35,.15);--radius:12px;
+  --font-display:'Cinzel',serif;--font-body:'Inter',sans-serif;--font-mono:'JetBrains Mono',monospace;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;display:flex;flex-direction:column;}
+a{color:inherit;text-decoration:none;}
+input,select,textarea{font-family:var(--font-body);}
+
+/* ── Layout ── */
+.layout{display:flex;min-height:100vh;}
+.sidebar-nav{width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:24px 0;flex-shrink:0;}
+.sidebar-nav .brand{padding:0 20px 24px;border-bottom:1px solid var(--border);margin-bottom:16px;}
+.brand-mark{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:grid;place-items:center;font-family:var(--font-display);font-size:14px;font-weight:700;color:#0a0c10;box-shadow:0 0 16px var(--glow);margin-bottom:8px;}
+.brand-name{font-family:var(--font-display);font-size:14px;color:var(--accent);}
+.brand-sub{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:2px;}
+
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:13px;color:var(--muted);cursor:pointer;transition:all .2s;border-left:3px solid transparent;}
+.nav-item:hover{background:rgba(255,255,255,.03);color:var(--text);}
+.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:rgba(245,166,35,.06);}
+.nav-icon{font-size:16px;width:20px;text-align:center;}
+.nav-section{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);padding:16px 20px 6px;margin-top:4px;}
+
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.top-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
+.top-bar-title{font-size:16px;font-weight:600;}
+.top-bar-right{display:flex;align-items:center;gap:12px;}
+.admin-badge{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;display:flex;align-items:center;gap:8px;}
+.admin-email{color:var(--accent);font-family:var(--font-mono);font-size:11px;}
+.btn{padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;border:none;font-family:var(--font-body);font-weight:500;transition:all .2s;}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0c10;}
+.btn-primary:hover{opacity:.88;}
+.btn-ghost{background:none;border:1px solid var(--border);color:var(--text);}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent);}
+.btn-danger{background:none;border:1px solid var(--border);color:var(--muted);}
+.btn-danger:hover{border-color:var(--danger);color:var(--danger);}
+.btn-sm{padding:5px 12px;font-size:12px;}
+
+.content-area{flex:1;padding:28px;overflow-y:auto;}
+
+/* ── Tabs ── */
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+
+/* ── Stats row ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;}
+.stat-card .stat-label{font-size:11px;color:var(--muted);letter-spacing:.05em;margin-bottom:8px;}
+.stat-card .stat-value{font-size:28px;font-weight:600;color:var(--text);}
+.stat-card .stat-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.stat-card.accent .stat-value{color:var(--accent);}
+.stat-card.success .stat-value{color:var(--success);}
+.stat-card.danger .stat-value{color:var(--danger);}
+
+/* ── Section cards ── */
+.section-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;overflow:hidden;}
+.section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.section-card-header h3{font-size:14px;font-weight:600;}
+.section-card-body{padding:20px;}
+
+/* ── Appointment table ── */
+.appt-table{width:100%;border-collapse:collapse;}
+.appt-table th{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);}
+.appt-table td{padding:12px 14px;font-size:13px;border-bottom:1px solid rgba(30,37,56,.5);}
+.appt-table tr:last-child td{border-bottom:none;}
+.appt-table tr:hover td{background:rgba(255,255,255,.015);}
+.tag{display:inline-flex;align-items:center;font-size:10px;padding:3px 9px;border-radius:20px;letter-spacing:.04em;font-weight:500;}
+.tag.booked{background:rgba(34,197,94,.12);color:var(--success);}
+.tag.cancelled{background:rgba(239,68,68,.12);color:var(--danger);}
+.tag.rescheduled{background:rgba(96,165,250,.12);color:var(--info);}
+
+/* ── Forms ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.form-grid.single{grid-template-columns:1fr;}
+.form-field{display:flex;flex-direction:column;gap:6px;}
+.form-field label{font-size:12px;color:var(--muted);letter-spacing:.04em;}
+.form-field input,.form-field select,.form-field textarea{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:13px;outline:none;transition:border-color .2s;appearance:none;}
+.form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:var(--accent);}
+.form-field select option{background:var(--bg);}
+.form-field textarea{resize:vertical;min-height:80px;line-height:1.5;}
+.form-actions{display:flex;gap:10px;margin-top:20px;}
+.form-section-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.form-section-title:first-child{margin-top:0;}
+
+/* ── Toggle ── */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text);padding:8px 0;}
+.toggle{position:relative;width:40px;height:22px;}
+.toggle input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:22px;cursor:pointer;transition:background .3s;}
+.toggle-slider::before{content:'';position:absolute;height:16px;width:16px;left:3px;top:3px;background:var(--muted);border-radius:50%;transition:transform .3s,background .3s;}
+.toggle input:checked+.toggle-slider{background:rgba(245,166,35,.25);}
+.toggle input:checked+.toggle-slider::before{transform:translateX(18px);background:var(--accent);}
+
+/* ── Calendar connect ── */
+.calendar-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--panel);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;}
+.cal-dot{width:10px;height:10px;border-radius:50%;}
+.cal-dot.connected{background:var(--success);box-shadow:0 0 8px var(--success);}
+.cal-dot.disconnected{background:var(--muted);}
+.cal-status-text{font-size:13px;}
+
+/* ── Users table ── */
+.user-row{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(30,37,56,.5);}
+.user-row:last-child{border-bottom:none;}
+.user-phone{font-family:var(--font-mono);font-size:12px;color:var(--accent);}
+.user-name-cell{font-size:13px;}
+.user-appt-count{font-size:12px;color:var(--muted);text-align:right;}
+
+/* ── Date picker ── */
+.date-picker-row{display:flex;align-items:center;gap:12px;margin-bottom:20px;}
+.date-picker-row label{font-size:12px;color:var(--muted);}
+.date-picker-row input[type="date"]{background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;font-family:var(--font-body);}
+.date-picker-row input[type="date"]:focus{border-color:var(--accent);}
+
+/* ── Toast ── */
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 18px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);animation:slide-in .3s ease;max-width:320px;}
+.toast.success{border-left:3px solid var(--success);}
+.toast.error{border-left:3px solid var(--danger);}
+.toast.info{border-left:3px solid var(--info);}
+@keyframes slide-in{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+
+/* ── Login ── */
+#adminLogin{position:fixed;inset:0;background:rgba(10,12,16,.97);backdrop-filter:blur(10px);z-index:9000;display:flex;align-items:center;justify-content:center;}
+#adminLogin.hidden{display:none;}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:44px 40px;width:400px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6);}
+.login-logo{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
+.login-logo-mark{width:48px;height:48px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:12px;display:grid;place-items:center;font-family:var(--font-display);font-size:20px;font-weight:700;color:#0a0c10;}
+.login-logo-text h2{font-family:var(--font-display);font-size:20px;color:var(--accent);}
+.login-logo-text p{font-size:11px;color:var(--muted);margin-top:2px;}
+.login-field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+.login-field label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+.login-field input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;padding:11px 14px;outline:none;transition:border-color .2s;}
+.login-field input:focus{border-color:var(--accent);}
+.login-btn{width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0c10;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;transition:opacity .2s;}
+.login-btn:hover{opacity:.88;}.login-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+.empty-state{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;}
+.empty-state span{font-size:32px;display:block;margin-bottom:10px;}
+
+/* ── Prompt preview ── */
+.prompt-preview{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;font-family:var(--font-mono);color:var(--muted);white-space:pre-wrap;max-height:200px;overflow-y:auto;margin-top:12px;line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Admin Login -->
+<div id="adminLogin">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-mark">સ</div>
+      <div class="login-logo-text">
+        <h2>SamaySetu Admin</h2>
+        <p>BUSINESS DASHBOARD</p>
+      </div>
+    </div>
+    <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="adminEmail" placeholder="admin@yourbusiness.com" onkeydown="if(event.key==='Enter')doAdminLogin()"/>
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="adminPassword" onkeydown="if(event.key==='Enter')doAdminLogin()"/>
+    </div>
+    <button class="login-btn" id="adminLoginBtn" onclick="doAdminLogin()">→ &nbsp;Enter Dashboard</button>
+  </div>
+</div>
+
+<!-- Main app -->
+<div class="layout" id="adminApp" style="display:none">
+  <!-- Sidebar nav -->
+  <nav class="sidebar-nav">
+    <div class="brand">
+      <div class="brand-mark">સ</div>
+      <div class="brand-name">SamaySetu</div>
+      <div class="brand-sub">Admin Panel</div>
+    </div>
+    <div class="nav-section">Overview</div>
+    <div class="nav-item active" onclick="switchTab('dashboard')"><span class="nav-icon">📊</span>Dashboard</div>
+    <div class="nav-section">Appointments</div>
+    <div class="nav-item" onclick="switchTab('today')"><span class="nav-icon">📅</span>Today's Schedule</div>
+    <div class="nav-item" onclick="switchTab('appointments')"><span class="nav-icon">🗓</span>All Appointments</div>
+    <div class="nav-section">Customers</div>
+    <div class="nav-item" onclick="switchTab('customers')"><span class="nav-icon">👥</span>Customer List</div>
+    <div class="nav-section">Configuration</div>
+    <div class="nav-item" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
+    <div class="nav-item" onclick="switchTab('calendar')"><span class="nav-icon">📆</span>Calendar Connect</div>
+    <div style="flex:1;"></div>
+    <div class="nav-item" onclick="doAdminLogout()" style="color:var(--danger);"><span class="nav-icon">✕</span>Logout</div>
+  </nav>
+
+  <div class="main-content">
+    <div class="top-bar">
+      <div class="top-bar-title" id="topBarTitle">Dashboard</div>
+      <div class="top-bar-right">
+        <div class="admin-badge">
+          <span>👤</span>
+          <span class="admin-email" id="adminEmailDisplay">—</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);" id="businessNameDisplay">—</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+
+      <!-- DASHBOARD TAB -->
+      <div class="tab-panel active" id="tab-dashboard">
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card accent"><div class="stat-label">Upcoming</div><div class="stat-value" id="st-upcoming">—</div><div class="stat-sub">confirmed appointments</div></div>
+          <div class="stat-card success"><div class="stat-label">Today</div><div class="stat-value" id="st-today">—</div><div class="stat-sub">appointments today</div></div>
+          <div class="stat-card"><div class="stat-label">Last 30 Days</div><div class="stat-value" id="st-30d">—</div><div class="stat-sub">bookings</div></div>
+          <div class="stat-card danger"><div class="stat-label">Cancellations</div><div class="stat-value" id="st-cancel">—</div><div class="stat-sub">last 30 days</div></div>
+          <div class="stat-card"><div class="stat-label">Customers</div><div class="stat-value" id="st-customers">—</div><div class="stat-sub">unique</div></div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Today's Appointments</h3>
+            <button class="btn btn-ghost btn-sm" onclick="loadToday()">Refresh</button>
+          </div>
+          <div class="section-card-body" id="dashTodayBody">
+            <div class="empty-state"><span>📅</span>Loading today's schedule...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TODAY TAB -->
+      <div class="tab-panel" id="tab-today">
+        <div class="date-picker-row">
+          <label>View date:</label>
+          <input type="date" id="todayDatePicker" onchange="loadAppointmentsForDate()"/>
+          <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Load</button>
+        </div>
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3 id="todayTableTitle">Appointments</h3>
+            <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Refresh</button>
+          </div>
+          <div class="section-card-body" id="todayTableBody">
+            <div class="empty-state"><span>📅</span>Select a date above</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ALL APPOINTMENTS TAB -->
+      <div class="tab-panel" id="tab-appointments">
+        <div class="date-picker-row">
+          <label>From:</label>
+          <input type="date" id="fromDate"/>
+          <label>To:</label>
+          <input type="date" id="toDate"/>
+          <button class="btn btn-primary btn-sm" onclick="loadAppointmentRange()">Search</button>
+        </div>
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Appointments</h3>
+          </div>
+          <div class="section-card-body" id="allApptBody">
+            <div class="empty-state"><span>🗓</span>Select date range and search</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CUSTOMERS TAB -->
+      <div class="tab-panel" id="tab-customers">
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Customer List</h3>
+            <button class="btn btn-ghost btn-sm" onclick="loadCustomers()">Refresh</button>
+          </div>
+          <div class="section-card-body" id="customersBody">
+            <div class="empty-state"><span>👥</span>Loading customers...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOT CONFIG TAB -->
+      <div class="tab-panel" id="tab-botconfig">
+        <div class="section-card">
+          <div class="section-card-header"><h3>Bot Personality & Identity</h3></div>
+          <div class="section-card-body">
+            <div class="form-section-title">Business Identity</div>
+            <div class="form-grid">
+              <div class="form-field">
+                <label>Bot / Business Name</label>
+                <input type="text" id="cfg_bot_name" placeholder="e.g. Dr. Sharma's Clinic AI"/>
+              </div>
+              <div class="form-field">
+                <label>Receptionist Name</label>
+                <input type="text" id="cfg_receptionist_name" placeholder="e.g. Priya"/>
+              </div>
+            </div>
+            <div class="form-field" style="margin-top:14px;">
+              <label>Business Description (shown in greeting and bot intro)</label>
+              <textarea id="cfg_business_description" placeholder="e.g. a friendly dental clinic in Ahmedabad offering 30-minute checkup slots"></textarea>
+            </div>
+            <div class="form-field" style="margin-top:14px;">
+              <label>Welcome / Greeting Message (optional override)</label>
+              <input type="text" id="cfg_greeting_message" placeholder="e.g. નમસ્તે! Dr. Sharma's Clinic AI બોલે છે."/>
+            </div>
+
+            <div class="form-section-title">Voice & Language</div>
+            <div class="form-grid">
+              <div class="form-field">
+                <label>Language</label>
+                <select id="cfg_language_code">
+                  <option value="gu-IN">Gujarati (gu-IN)</option>
+                  <option value="hi-IN">Hindi (hi-IN)</option>
+                  <option value="en-IN">English India (en-IN)</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>TTS Voice</label>
+                <select id="cfg_tts_speaker">
+                  <option value="simran">Simran (Female)</option>
+                  <option value="meera">Meera (Female)</option>
+                  <option value="arjun">Arjun (Male)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-section-title">Business Hours & Slots</div>
+            <div class="form-grid">
+              <div class="form-field">
+                <label>Opening Hour (24h)</label>
+                <input type="number" id="cfg_business_hours_start" min="0" max="23" placeholder="9"/>
+              </div>
+              <div class="form-field">
+                <label>Closing Hour (24h)</label>
+                <input type="number" id="cfg_business_hours_end" min="1" max="24" placeholder="18"/>
+              </div>
+            </div>
+            <div class="form-grid" style="margin-top:14px;">
+              <div class="form-field">
+                <label>Slot Duration (minutes)</label>
+                <select id="cfg_slot_duration_mins">
+                  <option value="15">15 min</option>
+                  <option value="30" selected>30 min</option>
+                  <option value="45">45 min</option>
+                  <option value="60">60 min</option>
+                  <option value="90">90 min</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Silence Timeout (ms)</label>
+                <input type="number" id="cfg_silence_timeout_ms" min="500" max="4000" placeholder="1500"/>
+              </div>
+            </div>
+
+            <div class="form-section-title">Advanced Prompt Customization</div>
+            <div class="form-field">
+              <label>Extra Prompt Context (appended to AI instructions)</label>
+              <textarea id="cfg_extra_prompt_context" placeholder="e.g. This clinic specializes in Ayurvedic treatments. Always mention that parking is free. The doctor speaks Gujarati and Hindi."></textarea>
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted);">
+              Preview of what the AI will receive:
+            </div>
+            <div class="prompt-preview" id="promptPreview">Save config to see the generated prompt preview.</div>
+
+            <div class="form-actions">
+              <button class="btn btn-primary" onclick="saveBotConfig()">💾 Save Configuration</button>
+              <button class="btn btn-ghost" onclick="loadBotConfig()">↺ Reset to Saved</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CALENDAR CONNECT TAB -->
+      <div class="tab-panel" id="tab-calendar">
+        <div class="section-card">
+          <div class="section-card-header"><h3>Google Calendar Integration</h3></div>
+          <div class="section-card-body">
+            <div class="calendar-status" id="calStatusBar">
+              <div class="cal-dot disconnected" id="calDot"></div>
+              <div>
+                <div class="cal-status-text" id="calStatusText">Not connected</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="calStatusSub"></div>
+              </div>
+            </div>
+
+            <div class="form-section-title">Connect a Google Calendar</div>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
+              Paste your Google Service Account JSON credentials below to connect your calendar. SamaySetu will use this to check availability and create/cancel events automatically.
+            </p>
+            <div class="form-field">
+              <label>Calendar ID (e.g. youremail@gmail.com or custom calendar ID)</label>
+              <input type="text" id="calendarId" placeholder="e.g. clinic@gmail.com"/>
+            </div>
+            <div class="form-field" style="margin-top:14px;">
+              <label>Service Account JSON</label>
+              <textarea id="serviceAccountJson" style="min-height:160px;font-family:var(--font-mono);font-size:11px;" placeholder='Paste the full contents of your service_account.json here...'></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" onclick="connectCalendar()">🔗 Connect Calendar</button>
+              <button class="btn btn-ghost" onclick="checkCalendarStatus()">Check Status</button>
+            </div>
+
+            <div class="form-section-title" style="margin-top:24px;">Setup Instructions</div>
+            <div style="font-size:12px;color:var(--muted);line-height:1.8;">
+              <b style="color:var(--text);">1.</b> Go to <b>Google Cloud Console</b> → Create a Service Account<br>
+              <b style="color:var(--text);">2.</b> Download the JSON key file<br>
+              <b style="color:var(--text);">3.</b> Share your Google Calendar with the service account email (give it <b>Editor</b> access)<br>
+              <b style="color:var(--text);">4.</b> Paste the JSON and your calendar ID above
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- content-area -->
+  </div><!-- main-content -->
+</div><!-- layout -->
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let adminToken = null;
+let adminSession = {};
+
+function showToast(msg, type='') {
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' '+type : '');
+  t.textContent = msg;
+  document.getElementById('toastContainer').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ── Admin login ───────────────────────────────────────────────────────────────
+async function doAdminLogin() {
+  const email = document.getElementById('adminEmail').value.trim();
+  const pass  = document.getElementById('adminPassword').value;
+  if (!email || !pass) { showToast('Email and password required', 'error'); return; }
+  const btn = document.getElementById('adminLoginBtn');
+  btn.disabled = true; btn.textContent = 'Logging in…';
+  try {
+    const r = await fetch('/admin/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email, password: pass })
+    });
+    if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || 'Login failed'); }
+    const data = await r.json();
+    adminToken = data.token;
+    adminSession = data;
+    localStorage.setItem('admin_token', adminToken);
+    localStorage.setItem('admin_session', JSON.stringify(data));
+    enterDashboard(data);
+  } catch(e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '→  Enter Dashboard';
+  }
+}
+function doAdminLogout() {
+  fetch('/admin/logout', { headers: { 'X-Admin-Token': adminToken } }).catch(()=>{});
+  adminToken = null; adminSession = {};
+  localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
+  document.getElementById('adminLogin').classList.remove('hidden');
+  document.getElementById('adminApp').style.display = 'none';
+}
+function enterDashboard(session) {
+  document.getElementById('adminLogin').classList.add('hidden');
+  document.getElementById('adminApp').style.display = 'flex';
+  document.getElementById('adminEmailDisplay').textContent = session.email || '—';
+  document.getElementById('businessNameDisplay').textContent = session.business_name || '';
+  loadStats();
+  loadToday();
+  loadBotConfig();
+  checkCalendarStatus();
+  // Set today in date pickers
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('todayDatePicker').value = today;
+  const lastWeek = new Date(Date.now() - 7*86400000).toISOString().split('T')[0];
+  document.getElementById('fromDate').value = lastWeek;
+  document.getElementById('toDate').value = today;
+}
+async function checkStoredLogin() {
+  const token = localStorage.getItem('admin_token');
+  const sess  = localStorage.getItem('admin_session');
+  if (!token || !sess) return;
+  // Verify token is still valid
+  try {
+    const r = await fetch('/admin/stats', { headers: { 'X-Admin-Token': token } });
+    if (!r.ok) throw new Error('expired');
+    adminToken = token;
+    adminSession = JSON.parse(sess);
+    enterDashboard(adminSession);
+  } catch(e) {
+    localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
+  }
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+const tabTitles = {
+  dashboard: 'Dashboard', today: "Today's Schedule",
+  appointments: 'All Appointments', customers: 'Customers',
+  botconfig: 'Bot Configuration', calendar: 'Calendar Connect'
+};
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.textContent.trim().toLowerCase().includes(name === 'today' ? "today" : name === 'botconfig' ? 'bot' : name === 'calendar' ? 'calendar' : name))
+      n.classList.add('active');
+  });
+  document.getElementById('topBarTitle').textContent = tabTitles[name] || name;
+  if (name === 'customers') loadCustomers();
+  if (name === 'today') loadAppointmentsForDate();
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function apiFetch(path, options={}) {
+  const r = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken, ...(options.headers||{}) } });
+  if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || `API error ${r.status}`); }
+  return r.json();
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const stats = await apiFetch('/admin/stats');
+    document.getElementById('st-upcoming').textContent  = stats.upcoming ?? '—';
+    document.getElementById('st-today').textContent     = stats.today_total ?? '—';
+    document.getElementById('st-30d').textContent       = stats.booked_30d ?? '—';
+    document.getElementById('st-cancel').textContent    = stats.cancelled_30d ?? '—';
+    document.getElementById('st-customers').textContent = stats.unique_customers ?? '—';
+  } catch(e) { showToast('Could not load stats', 'error'); }
+}
+
+// ── Today / schedule ──────────────────────────────────────────────────────────
+async function loadToday() {
+  try {
+    const appts = await apiFetch('/admin/appointments/today');
+    renderApptTable(appts, 'dashTodayBody');
+  } catch(e) { showToast('Could not load today\'s schedule', 'error'); }
+}
+async function loadAppointmentsForDate() {
+  const date = document.getElementById('todayDatePicker').value;
+  if (!date) return;
+  document.getElementById('todayTableTitle').textContent = 'Appointments — ' + date;
+  try {
+    const appts = await apiFetch(`/admin/appointments?appt_date=${date}`);
+    renderApptTable(appts, 'todayTableBody');
+  } catch(e) { showToast('Could not load appointments', 'error'); }
+}
+async function loadAppointmentRange() {
+  const from = document.getElementById('fromDate').value;
+  const to   = document.getElementById('toDate').value;
+  if (!from || !to) { showToast('Select both dates', 'error'); return; }
+  try {
+    const appts = await apiFetch(`/admin/appointments?from_date=${from}T00:00:00&to_date=${to}T23:59:59`);
+    renderApptTable(appts, 'allApptBody');
+  } catch(e) { showToast('Could not load appointments', 'error'); }
+}
+function renderApptTable(appts, containerId) {
+  const el = document.getElementById(containerId);
+  if (!appts || appts.length === 0) {
+    el.innerHTML = '<div class="empty-state"><span>📭</span>No appointments found.</div>'; return;
+  }
+  el.innerHTML = `<table class="appt-table">
+    <thead><tr><th>Time</th><th>Customer</th><th>Phone</th><th>Status</th></tr></thead>
+    <tbody>${appts.map(a => {
+      const dt = new Date(a.start_time);
+      const timeStr = dt.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+      const dateStr = dt.toLocaleDateString('en-IN', {day:'numeric',month:'short'});
+      const cls = (a.status||'BOOKED').toLowerCase();
+      return `<tr>
+        <td><b>${timeStr}</b><br><span style="font-size:11px;color:var(--muted)">${dateStr}</span></td>
+        <td>${a.customer_name || '—'}</td>
+        <td style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">${a.phone_number}</td>
+        <td><span class="tag ${cls}">${a.status||'BOOKED'}</span></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+async function loadCustomers() {
+  try {
+    const users = await apiFetch('/admin/users');
+    const el = document.getElementById('customersBody');
+    if (!users || users.length === 0) {
+      el.innerHTML = '<div class="empty-state"><span>👥</span>No customers yet.</div>'; return;
+    }
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--muted);padding:8px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr auto;gap:12px;">
+        <span>NAME</span><span>PHONE</span><span>APPTS</span>
+      </div>
+      ${users.map(u => `<div class="user-row">
+        <div class="user-name-cell">${u.name || '—'}</div>
+        <div class="user-phone">${u.phone_number}</div>
+        <div class="user-appt-count">${u.appointment_count || 0} appts</div>
+      </div>`).join('')}`;
+  } catch(e) { showToast('Could not load customers', 'error'); }
+}
+
+// ── Bot config ────────────────────────────────────────────────────────────────
+async function loadBotConfig() {
+  try {
+    const cfg = await apiFetch('/admin/bot-config');
+    if (!cfg || !cfg.config_id) return;
+    document.getElementById('cfg_bot_name').value = cfg.bot_name || '';
+    document.getElementById('cfg_receptionist_name').value = cfg.receptionist_name || '';
+    document.getElementById('cfg_business_description').value = cfg.business_description || '';
+    document.getElementById('cfg_greeting_message').value = cfg.greeting_message || '';
+    document.getElementById('cfg_language_code').value = cfg.language_code || 'gu-IN';
+    document.getElementById('cfg_tts_speaker').value = cfg.tts_speaker || 'simran';
+    document.getElementById('cfg_business_hours_start').value = cfg.business_hours_start ?? 9;
+    document.getElementById('cfg_business_hours_end').value = cfg.business_hours_end ?? 18;
+    document.getElementById('cfg_slot_duration_mins').value = cfg.slot_duration_mins || 30;
+    document.getElementById('cfg_silence_timeout_ms').value = cfg.silence_timeout_ms || 1500;
+    document.getElementById('cfg_extra_prompt_context').value = cfg.extra_prompt_context || '';
+    updatePromptPreview(cfg);
+  } catch(e) {}
+}
+async function saveBotConfig() {
+  const body = {
+    bot_name: document.getElementById('cfg_bot_name').value,
+    receptionist_name: document.getElementById('cfg_receptionist_name').value,
+    business_description: document.getElementById('cfg_business_description').value,
+    greeting_message: document.getElementById('cfg_greeting_message').value,
+    language_code: document.getElementById('cfg_language_code').value,
+    tts_speaker: document.getElementById('cfg_tts_speaker').value,
+    business_hours_start: parseInt(document.getElementById('cfg_business_hours_start').value) || 9,
+    business_hours_end: parseInt(document.getElementById('cfg_business_hours_end').value) || 18,
+    slot_duration_mins: parseInt(document.getElementById('cfg_slot_duration_mins').value) || 30,
+    silence_timeout_ms: parseInt(document.getElementById('cfg_silence_timeout_ms').value) || 1500,
+    extra_prompt_context: document.getElementById('cfg_extra_prompt_context').value,
+  };
+  try {
+    const cfg = await apiFetch('/admin/bot-config', { method: 'POST', body: JSON.stringify(body) });
+    showToast('Configuration saved ✓', 'success');
+    updatePromptPreview(body);
+  } catch(e) { showToast('Save failed: ' + e.message, 'error'); }
+}
+function updatePromptPreview(cfg) {
+  const today = new Date().toISOString().split('T')[0];
+  const day   = new Date().toLocaleDateString('en-US', {weekday:'long'});
+  const preview = `You are ${cfg.receptionist_name || 'Priya'}, AI receptionist at ${cfg.bot_name || 'SamaySetu AI'} — ${cfg.business_description || 'a professional appointment booking service'}.
+Today: ${today} (${day}). All times in IST.
+Business hours: ${cfg.business_hours_start ?? 9}:00 to ${cfg.business_hours_end ?? 18}:00. Default slot: ${cfg.slot_duration_mins || 30} minutes.
+${cfg.greeting_message ? 'Greeting: ' + cfg.greeting_message : ''}
+${cfg.extra_prompt_context ? 'Extra context: ' + cfg.extra_prompt_context : ''}
+[... rest of standard booking rules appended automatically ...]`;
+  document.getElementById('promptPreview').textContent = preview.trim();
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+async function checkCalendarStatus() {
+  try {
+    const s = await apiFetch('/admin/calendar/status');
+    const dot = document.getElementById('calDot');
+    const txt = document.getElementById('calStatusText');
+    const sub = document.getElementById('calStatusSub');
+    if (s.connected) {
+      dot.className = 'cal-dot connected';
+      txt.textContent = 'Connected';
+      sub.textContent = `Calendar: ${s.calendar_id} · Connected ${new Date(s.connected_at).toLocaleDateString()}`;
+      if (s.calendar_id) document.getElementById('calendarId').value = s.calendar_id;
+    } else {
+      dot.className = 'cal-dot disconnected';
+      txt.textContent = 'Not connected';
+      sub.textContent = '';
+    }
+  } catch(e) {}
+}
+async function connectCalendar() {
+  const calId = document.getElementById('calendarId').value.trim();
+  const json  = document.getElementById('serviceAccountJson').value.trim();
+  if (!calId || !json) { showToast('Both Calendar ID and Service Account JSON are required', 'error'); return; }
+  try {
+    JSON.parse(json);
+  } catch(e) { showToast('Invalid JSON format', 'error'); return; }
+  try {
+    await apiFetch('/admin/calendar/connect', {
+      method: 'POST',
+      body: JSON.stringify({ calendar_id: calId, service_account_json: json })
+    });
+    showToast('Calendar connected ✓', 'success');
+    checkCalendarStatus();
+  } catch(e) { showToast('Connection failed: ' + e.message, 'error'); }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+checkStoredLogin();
+</script>
+</body>
+</html>

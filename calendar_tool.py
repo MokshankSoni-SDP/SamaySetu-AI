@@ -34,7 +34,13 @@ def _try_db(fn, *args, **kwargs):
         print(f"[DB] Non-fatal DB error in calendar_tool: {e}")
         return None
 
-SERVICE_ACCOUNT_FILE = 'service_account.json' 
+SERVICE_ACCOUNT_FILE = 'service_account.json'
+# NOTE (multi-tenant upgrade path):
+# Right now this file is loaded once at startup for ALL tenants.
+# When you want per-tenant calendars, replace this with a function that
+# reads the service_account JSON from the calendar_tokens table (see crud.py)
+# and builds credentials dynamically per tenant_id.
+# For now: keep your service_account.json in the project root as before.
 CALENDAR_ID = os.getenv('CALENDER_ID')
 
 # UPDATED: Changed from .readonly to allow event creation

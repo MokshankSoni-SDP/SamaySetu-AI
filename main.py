@@ -5,9 +5,13 @@ import base64
 import asyncio
 import struct
 import traceback
+import hashlib
+import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sarvamai import AsyncSarvamAI
 from dotenv import load_dotenv
@@ -18,7 +22,7 @@ import prompts
 from calendar_tool import *
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from datetime import datetime
+from datetime import datetime, date
 
 # ── Database imports ────────────────────────────────────────────────────────
 try:
@@ -26,40 +30,96 @@ try:
     from database.crud import (
         create_user_if_not_exists,
         get_user_appointments,
+        get_tenant_by_id,
+        get_bot_config,
+        upsert_bot_config,
+        get_tenant_users,
+        get_tenant_stats,
+        get_tenant_appointments_for_date,
+        get_tenant_appointments_range,
+        get_all_tenants,
+        create_tenant,
+        get_platform_stats,
+        update_tenant_status,
+        create_tenant_admin,
+        get_admin_by_email,
+        save_calendar_token,
+        get_calendar_token,
     )
     DB_AVAILABLE = True
 except ImportError as _db_import_err:
     DB_AVAILABLE = False
-    print(f"[DB] psycopg2 not installed or database module missing: {_db_import_err}")
+    print(f"[DB] Database module missing: {_db_import_err}")
 
-# ── Logging helper ─────────────────────────────────────────────────────────────
+
 def log(step: str, msg: str):
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{ts}] {step}: {msg}")
 
-# ── Setup & Environment ────────────────────────────────────────────────────────
+
 load_dotenv()
 
 
-# ── FastAPI lifespan: initialise DB tables on startup ──────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run startup tasks (DB table creation) then yield to serve requests."""
     if DB_AVAILABLE:
         await asyncio.to_thread(create_tables)
     else:
         print("[DB] Skipping table creation — psycopg2 unavailable.")
-    yield   # application runs
-    # (shutdown cleanup goes here if needed)
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
+
 class UserLoginRequest(BaseModel):
     phone_number: str
     name: Optional[str] = None
+    tenant_id: Optional[str] = None   # Optional — resolved from host/header if not sent
+
+class AdminLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class AdminRegisterRequest(BaseModel):
+    email: str
+    password: str
+    tenant_id: str
+    role: str = "admin"
+
+class TenantCreateRequest(BaseModel):
+    business_name: str
+    business_type: str = "general"
+    owner_email: str
+    admin_password: str
+
+class BotConfigRequest(BaseModel):
+    bot_name: Optional[str] = None
+    receptionist_name: Optional[str] = None
+    language_code: Optional[str] = None
+    tts_speaker: Optional[str] = None
+    business_hours_start: Optional[int] = None
+    business_hours_end: Optional[int] = None
+    slot_duration_mins: Optional[int] = None
+    silence_timeout_ms: Optional[int] = None
+    greeting_message: Optional[str] = None
+    business_description: Optional[str] = None
+    extra_prompt_context: Optional[str] = None
+    calendar_id: Optional[str] = None
+
+class CalendarConnectRequest(BaseModel):
+    calendar_id: str
+    service_account_json: str   # JSON string of the service account credentials
+
 
 SARVAM_API_KEY = os.getenv('SARVAM_API_KEY')
 client_stt = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
@@ -70,13 +130,53 @@ tools = [check_calendar_availability, book_appointment, cancel_appointment,
          reschedule_appointment, suggest_next_available_slot]
 llm_with_tools = llm.bind_tools(tools)
 
+# ── HTML page routes (must come BEFORE the /static mount) ───────────────────
+@app.get("/")
+async def serve_customer():
+    return FileResponse("static/index.html")
+
+@app.get("/admin")
+async def serve_admin():
+    return FileResponse("static/admin.html")
+
+@app.get("/superadmin")
+async def serve_superadmin():
+    return FileResponse("static/superadmin.html")
+
+# ── Public endpoint: bot config for customer UI (no auth needed) ─────────────
+@app.get("/public/bot-config")
+async def public_bot_config(tenant_id: Optional[str] = None):
+    """
+    Returns the safe subset of bot_config that the customer UI needs
+    (name, description, greeting, hours, language, speaker).
+    No secrets, no calendar credentials.
+    """
+    if not tenant_id or not DB_AVAILABLE:
+        return {}
+    try:
+        cfg = await asyncio.to_thread(get_bot_config, tenant_id)
+        if not cfg:
+            return {}
+        # Only expose safe fields to the public
+        return {k: cfg[k] for k in (
+            "bot_name", "receptionist_name", "language_code", "tts_speaker",
+            "business_hours_start", "business_hours_end", "slot_duration_mins",
+            "silence_timeout_ms", "greeting_message", "business_description",
+        ) if k in cfg}
+    except Exception:
+        return {}
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# chat_sessions maps session_id → {"history": [...], "phone_number": str|None}
+# ── In-memory session store ──────────────────────────────────────────────────
+# chat_sessions maps session_id → {history, phone_number, tenant_id, bot_config}
 chat_sessions: Dict[str, dict] = {}
-MAX_HISTORY = 5  # increased from 5 — avoids context amnesia on longer conversations
+# admin_sessions maps token → {tenant_id, email, role}
+admin_sessions: Dict[str, dict] = {}
+# super_admin_sessions maps token → {email}
+superadmin_sessions: Dict[str, dict] = {}
 
-# maximum number of iteration llm can make 
+MAX_HISTORY = 5
 MAX_TOOL_ITERATIONS = 4
 
 # Gujarati number words → digits
@@ -85,61 +185,27 @@ GUJ_NUMBERS = {
     "પાંચ": 5, "છ": 6, "સાત": 7, "આઠ": 8,
     "નવ": 9, "દસ": 10, "અગિયાર": 11, "બાર": 12
 }
-
-# Handle half / quarter / special phrases
-SPECIAL_PHRASES = {
-    "દોઢ": (1, 30),
-    "અઢી": (2, 30),
-}
-
+SPECIAL_PHRASES = {"દોઢ": (1, 30), "અઢી": (2, 30)}
 COMMON_STT_VARIANTS = {
-    "સ્વા": "સવા",
-    "સવા": "સવા",
-    "સાડા": "સાડા",
-    "સાડા": "સાડા",
-    "પોના": "પોણા",
-    "પોણા": "પોણા"
+    "સ્વા": "સવા", "સવા": "સવા",
+    "સાડા": "સાડા", "પોના": "પોણા", "પોણા": "પોણા"
 }
 
-
-
-# ── Noisy STT filter (Fix #2) ──────────────────────────────────────────────────
 import re as _re
 
 def is_noisy_transcript(text: str) -> bool:
-    """
-    Heuristic to detect garbled / low-confidence STT output before it reaches
-    the LLM. Returns True (= noisy, should not be processed as intent) if ANY
-    of the following are true:
-
-      1. Very short after stripping punctuation/spaces (≤ 3 meaningful chars)
-      2. Word repetition: same word appears ≥ 3 times in a short string
-      3. High repetition ratio: > 50 % of tokens are duplicates
-      4. Incomplete / truncated fragments that contain no verb or noun signal
-
-    These patterns appeared directly in the logs (e.g. "ડાયલેક્ટ ડાયલેક્ટ
-    કરી બપોરે બપોરે 3:00 વાગ્યા વાગ્યાની અપ").
-    """
     stripped = _re.sub(r'[\s.,!?।\u0964]+', ' ', text).strip()
-
-    # Rule 1 — too short to be meaningful
     if len(stripped) <= 3:
         return True
-
     tokens = stripped.split()
-
-    # Rule 2 — any single word repeated 3+ times
     from collections import Counter
     counts = Counter(tokens)
     if any(v >= 3 for v in counts.values()):
         return True
-
-    # Rule 3 — duplicate tokens make up more than half the message
     if len(tokens) >= 4:
         unique = len(set(tokens))
         if unique / len(tokens) < 0.5:
             return True
-
     return False
 
 def normalize_variants(text):
@@ -148,106 +214,63 @@ def normalize_variants(text):
     return text
 
 def normalize_gujarati_time(text: str) -> str:
-    """
-    Convert Gujarati spoken time phrases into numeric format.
-    Example:
-    'સવા ત્રણ' → '3:15'
-    'સાડા ચાર' → '4:30'
-    'પોણા બે' → '1:45'
-    """
-
     original_text = text
-
-    # normalize spacing
     text = text.lower().strip()
-
-    # handle દોઢ / અઢી
     for phrase, (h, m) in SPECIAL_PHRASES.items():
         if phrase in text:
-            time_str = f"{h}:{m:02d}"
-            text = text.replace(phrase, time_str)
-
+            text = text.replace(phrase, f"{h}:{m:02d}")
     text = normalize_variants(text)
-
-    # સવા (quarter past)
-    match = re.search(r"સવા\s*(\w+)", text)
-    if match:
-        hour_word = match.group(1)
-        hour = GUJ_NUMBERS.get(hour_word)
-        if hour:
-            time_str = f"{hour}:{15}"
-            text = text.replace(match.group(0), time_str)
-
-    # સાડા (half past)
-    match = re.search(r"સાડા\s*(\w+)", text)
-    if match:
-        hour_word = match.group(1)
-        hour = GUJ_NUMBERS.get(hour_word)
-        if hour:
-            time_str = f"{hour}:{30}"
-            text = text.replace(match.group(0), time_str)
-
-    # પોણા (quarter to)
-    match = re.search(r"પોણા\s*(\w+)", text)
-    if match:
-        hour_word = match.group(1)
-        hour = GUJ_NUMBERS.get(hour_word)
-        if hour:
-            hour -= 1
-            time_str = f"{hour}:{45}"
-            text = text.replace(match.group(0), time_str)
-
+    for prefix, minutes, offset in [("સવા", 15, 0), ("સાડા", 30, 0), ("પોણા", 45, -1)]:
+        match = re.search(rf"{prefix}\s*(\w+)", text)
+        if match:
+            hour_word = match.group(1)
+            hour = GUJ_NUMBERS.get(hour_word)
+            if hour:
+                h = hour + offset
+                text = text.replace(match.group(0), f"{h}:{minutes}")
     return text
 
-# ── Fallback message selector (Fix #7) ────────────────────────────────────────
 def _get_fallback_message(exc: Exception) -> str:
-    """
-    Maps known exception types to a polite Gujarati fallback phrase that is
-    spoken aloud to the user instead of silence.
-    """
     err_str = str(exc).lower()
-    if "rate_limit" in err_str or "429" in err_str or "tokens per day" in err_str:
-        return (
-            "માફ કરશો, અત્યારે સર્વર ખૂબ વ્યસ્ત છે. "
-            "થોડી વાર પછી ફરી પ્રયત્ન કરો."
-        )
+    if "rate_limit" in err_str or "429" in err_str:
+        return "માફ કરશો, અત્યારે સર્વર ખૂબ વ્યસ્ત છે. થોડી વાર પછી ફરી પ્રયત્ન કરો."
     if "timeout" in err_str or "timed out" in err_str:
-        return (
-            "માફ કરશો, જવાબ આવવામાં વધુ સમય લાગ્યો. "
-            "કૃપા કરી ફરી પ્રયત્ન કરો."
-        )
+        return "માફ કરશો, જવાબ આવવામાં વધુ સમય લાગ્યો. કૃપા કરી ફરી પ્રયત્ન કરો."
     if "connection" in err_str or "network" in err_str:
-        return (
-            "નેટવર્ક સમસ્યા આવી. "
-            "કૃપા કરી ઇન્ટરનેટ તપાસો અને ફરી બોલો."
-        )
-    # Generic fallback
-    return (
-        "માફ કરશો, કંઈક ભૂલ થઈ. "
-        "થોડી વાર પછી ફરી પ્રયત્ન કરો."
-    )
+        return "નેટવર્ક સમસ્યા આવી. કૃપા કરી ઇન્ટરનેટ તપાસો અને ફરી બોલો."
+    return "માફ કરશો, કંઈક ભૂલ થઈ. થોડી વાર પછી ફરી પ્રયત્ન કરો."
 
 
-# ── REST endpoints ──────────────────────────────────────────────────────────
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def _check_admin_token(x_admin_token: Optional[str] = Header(None)):
+    if not x_admin_token or x_admin_token not in admin_sessions:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+    return admin_sessions[x_admin_token]
+
+def _check_superadmin_token(x_superadmin_token: Optional[str] = Header(None)):
+    key = os.getenv("SUPERADMIN_SECRET", "changeme-superadmin")
+    if x_superadmin_token != key:
+        raise HTTPException(status_code=401, detail="Superadmin access denied")
+
+
+# ── REST endpoints ────────────────────────────────────────────────────────────
+
+# ── Customer endpoints ────────────────────────────────────────────────────────
 
 @app.post("/user/login")
 async def user_login(req: UserLoginRequest):
-    """
-    Registers a new user or returns existing user details.
-    Phone number acts as the primary identifier.
-    """
     if not req.phone_number or not req.phone_number.strip():
         raise HTTPException(status_code=400, detail="phone_number is required")
-
     if not DB_AVAILABLE:
-        # Graceful degradation: allow login even without DB
         return {"status": "success", "phone_number": req.phone_number, "db": False}
-
     try:
         await asyncio.to_thread(
             create_user_if_not_exists,
-            req.phone_number.strip(),
-            req.name
+            req.phone_number.strip(), req.name, req.tenant_id
         )
         return {"status": "success", "phone_number": req.phone_number.strip()}
     except Exception as e:
@@ -256,20 +279,194 @@ async def user_login(req: UserLoginRequest):
 
 
 @app.get("/appointments/{phone_number}")
-async def get_appointments(phone_number: str):
-    """
-    Returns all appointments for a user ordered by most recent first.
-    """
+async def get_appointments(phone_number: str, tenant_id: Optional[str] = None):
     if not DB_AVAILABLE:
         return []
     try:
-        appointments = await asyncio.to_thread(get_user_appointments, phone_number)
-        return appointments
+        appts = await asyncio.to_thread(get_user_appointments, phone_number, tenant_id)
+        return appts
     except Exception as e:
-        print(f"[DB] /appointments/{phone_number} error: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch appointments")
 
-# ── Token usage logger ─────────────────────────────────────────────────────────
+
+# ── Admin auth endpoints ──────────────────────────────────────────────────────
+
+@app.post("/admin/login")
+async def admin_login(req: AdminLoginRequest):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    admin = await asyncio.to_thread(get_admin_by_email, req.email)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if admin["password_hash"] != _hash_password(req.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not admin.get("tenant_active", True):
+        raise HTTPException(status_code=403, detail="This account is suspended")
+    token = secrets.token_hex(32)
+    admin_sessions[token] = {
+        "tenant_id": admin["tenant_id"],
+        "email": admin["email"],
+        "role": admin["role"],
+        "business_name": admin.get("business_name", ""),
+    }
+    return {"token": token, "tenant_id": admin["tenant_id"],
+            "role": admin["role"], "business_name": admin.get("business_name")}
+
+
+@app.post("/admin/logout")
+async def admin_logout(session=Depends(_check_admin_token),
+                       x_admin_token: Optional[str] = Header(None)):
+    if x_admin_token in admin_sessions:
+        del admin_sessions[x_admin_token]
+    return {"status": "logged out"}
+
+
+# ── Admin dashboard endpoints ─────────────────────────────────────────────────
+
+@app.get("/admin/stats")
+async def admin_stats(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return {}
+    stats = await asyncio.to_thread(get_tenant_stats, tenant_id)
+    return stats
+
+
+@app.get("/admin/appointments/today")
+async def admin_today(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    today = date.today().isoformat()
+    if not DB_AVAILABLE:
+        return []
+    appts = await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, today)
+    return appts
+
+
+@app.get("/admin/appointments")
+async def admin_appointments(session=Depends(_check_admin_token),
+                              from_date: Optional[str] = None,
+                              to_date: Optional[str] = None,
+                              appt_date: Optional[str] = None):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return []
+    if appt_date:
+        return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, appt_date)
+    if from_date and to_date:
+        return await asyncio.to_thread(get_tenant_appointments_range, tenant_id, from_date, to_date)
+    # Default: today
+    today = date.today().isoformat()
+    return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, today)
+
+
+@app.get("/admin/users")
+async def admin_users(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(get_tenant_users, tenant_id)
+
+
+@app.get("/admin/bot-config")
+async def admin_get_config(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return {}
+    cfg = await asyncio.to_thread(get_bot_config, tenant_id)
+    return cfg or {}
+
+
+@app.post("/admin/bot-config")
+async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    fields = {k: v for k, v in req.dict().items() if v is not None}
+    cfg = await asyncio.to_thread(upsert_bot_config, tenant_id, **fields)
+    return cfg
+
+
+@app.post("/admin/calendar/connect")
+async def admin_connect_calendar(req: CalendarConnectRequest,
+                                  session=Depends(_check_admin_token)):
+    """
+    Store Google Calendar credentials for this tenant.
+    The frontend submits a service_account JSON string + the calendar ID.
+    The backend stores it and uses it for subsequent calendar operations.
+    """
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    # Validate the JSON is parseable
+    try:
+        json.loads(req.service_account_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid service account JSON")
+    token = await asyncio.to_thread(
+        save_calendar_token, tenant_id, req.calendar_id, req.service_account_json
+    )
+    # Also update bot_config with calendar_id for quick access
+    await asyncio.to_thread(upsert_bot_config, tenant_id, calendar_id=req.calendar_id)
+    return {"status": "connected", "calendar_id": req.calendar_id}
+
+
+@app.get("/admin/calendar/status")
+async def admin_calendar_status(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return {"connected": False}
+    token = await asyncio.to_thread(get_calendar_token, tenant_id)
+    if token:
+        return {"connected": True, "calendar_id": token["calendar_id"],
+                "connected_at": token["connected_at"]}
+    return {"connected": False}
+
+
+# ── Superadmin (SamaySetu platform owner) endpoints ──────────────────────────
+
+@app.get("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_tenants():
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(get_all_tenants)
+
+
+@app.post("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_create_tenant(req: TenantCreateRequest):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    tenant = await asyncio.to_thread(
+        create_tenant, req.business_name, req.business_type, req.owner_email
+    )
+    # Create default bot config
+    await asyncio.to_thread(upsert_bot_config, tenant["tenant_id"],
+                             bot_name=req.business_name)
+    # Create owner admin account
+    await asyncio.to_thread(
+        create_tenant_admin,
+        tenant["tenant_id"], req.owner_email,
+        _hash_password(req.admin_password), "owner"
+    )
+    return tenant
+
+
+@app.patch("/superadmin/tenants/{tenant_id}/status",
+           dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_set_status(tenant_id: str, is_active: bool):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    ok = await asyncio.to_thread(update_tenant_status, tenant_id, is_active)
+    return {"updated": ok}
+
+
+@app.get("/superadmin/stats", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_stats():
+    if not DB_AVAILABLE:
+        return {}
+    return await asyncio.to_thread(get_platform_stats)
+
+
+# ── Token usage logger ────────────────────────────────────────────────────────
 def print_token_usage(msg, step_name):
     usage = msg.response_metadata.get("token_usage", {})
     if usage:
@@ -277,23 +474,13 @@ def print_token_usage(msg, step_name):
               f"completion={usage.get('completion_tokens')} "
               f"total={usage.get('total_tokens')} ---")
 
-# ── Calendar tool runner (non-blocking) ───────────────────────────────────────
 async def run_tool_async(tool_name: str, args: dict):
     func = globals()[tool_name]
     return await asyncio.to_thread(func, **args)
 
-# ── Sentence splitter ──────────────────────────────────────────────────────────
-# Splits Gujarati + mixed text on sentence-ending punctuation.
-# Keeps chunks >= MIN_CHUNK_CHARS so we don't fire TTS for tiny fragments.
 MIN_CHUNK_CHARS = 20
 
 def split_into_sentences(text: str) -> List[str]:
-    """
-    Split reply text into TTS-ready sentence chunks.
-    Handles Gujarati (।), Hindi (।) and standard punctuation (. ! ?).
-    Short fragments are merged with the previous chunk to avoid
-    tiny round-trips to the TTS API.
-    """
     raw = re.split(r'(?<=[.!?।\u0964])\s+', text.strip())
     chunks, buffer = [], ""
     for part in raw:
@@ -306,68 +493,49 @@ def split_into_sentences(text: str) -> List[str]:
             buffer = ""
     if buffer:
         if chunks and len(buffer) < MIN_CHUNK_CHARS:
-            chunks[-1] += " " + buffer   # merge tiny tail into last chunk
+            chunks[-1] += " " + buffer
         else:
             chunks.append(buffer)
-    return chunks or [text]             # fallback: treat whole text as 1 chunk
+    return chunks or [text]
 
-# ── TTS with retry ─────────────────────────────────────────────────────────────
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=4),
     retry=retry_if_exception_type(Exception),
-    before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed, retrying…")
+    before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed…")
 )
-async def tts_convert(text: str) -> str:
-    """Call Sarvam TTS and return base64 audio string."""
+async def tts_convert(text: str, speaker: str = "simran", lang: str = "gu-IN") -> str:
     res = await client_tts.text_to_speech.convert(
         text=text,
-        target_language_code="gu-IN",
+        target_language_code=lang,
         model="bulbul:v3",
-        speaker="simran"
+        speaker=speaker
     )
     return res.audios[0]
 
-# ── LLM with retry ────────────────────────────────────────────────────────────
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=1, max=5),
     retry=retry_if_exception_type(Exception),
-    before_sleep=lambda rs: log("[LLM_RETRY]", f"Attempt {rs.attempt_number} failed, retrying…")
+    before_sleep=lambda rs: log("[LLM_RETRY]", f"Attempt {rs.attempt_number} failed…")
 )
 async def safe_llm_call(messages):
     return await llm_with_tools.ainvoke(messages)
 
-# ── Brain ──────────────────────────────────────────────────────────────────────
 async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
-    """
-    Streaming TTS pipeline:
-      1. LLM produces full reply text           (~1 s)
-      2. Split reply into sentences
-      3. Send full text to frontend immediately  (chat bubble appears)
-      4. For each sentence in order:
-           - Generate TTS chunk                 (~2 s per chunk)
-           - Send audio_chunk to frontend       (frontend queues + plays sequentially)
-      5. Send tts_done so frontend knows it's over
-
-    Result: user hears first sentence at ~3 s total instead of waiting
-    11 s for the entire audio blob.
-    """
     t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
     day   = t0.strftime("%A")
 
-    # normalize Gujarati time phrases
     log("[NORMALIZER]", f"Before: {user_text}")
     user_text = normalize_gujarati_time(user_text)
     log("[NORMALIZER]", f"After: {user_text}")
 
-    log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}'")
+    log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}' | phone='{chat_sessions.get(session_id, {}).get('phone_number')}' | tenant='{chat_sessions.get(session_id, {}).get('tenant_id')}'")
 
-    # ── Fix #2: Handle noisy/garbled STT — respond with clarification, skip tools ──
     if user_text == "__UNCLEAR__":
         clarification = "માફ કરશો, મને સ્પષ્ટ સંભળાયું નહીં. શું તમે ફરીથી કહી શકો?"
-        log("[BRAIN]", "Noisy input — sending clarification without LLM call")
+        log("[BRAIN]", "Noisy input — sending clarification")
         sentences = split_into_sentences(clarification)
         await websocket.send_json({"type": "ai_text", "text": clarification, "chunk_count": len(sentences)})
         await websocket.send_json({"type": "ai_speaking_start"})
@@ -380,165 +548,110 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         await websocket.send_json({"type": "tts_done"})
         return
 
-    # Initialise or retrieve session metadata.
-    # NOTE: The WS handler pre-creates the session with empty history so the
-    # phone_number is available immediately. We detect this here and inject the
-    # system prompt, ensuring the LLM always knows today's date.
     if session_id not in chat_sessions:
-        log("[BRAIN]", "New session — initialising with system prompt")
-        chat_sessions[session_id] = {
-            "history": [],
-            "phone_number": None,
-        }
+        chat_sessions[session_id] = {"history": [], "phone_number": None,
+                                      "tenant_id": None, "bot_config": None}
 
     session_data = chat_sessions[session_id]
     history      = session_data["history"]
     phone_number = session_data.get("phone_number")
+    bot_config   = session_data.get("bot_config") or {}
+    tts_speaker  = bot_config.get("tts_speaker", "simran")
+    tts_lang     = bot_config.get("language_code", "gu-IN")
 
-    # Add system prompt if missing (first call in this session)
     if not history or not isinstance(history[0], SystemMessage):
         log("[BRAIN]", f"Injecting system prompt | today={today} day={day}")
-        history.insert(0, SystemMessage(content=prompts.get_system_prompt(today, day)))
-    else:
-        log("[BRAIN]", f"Existing session | history len={len(history)}")
+        history.insert(0, SystemMessage(content=prompts.get_system_prompt(today, day, bot_config)))
 
     history.append(HumanMessage(content=user_text))
     recent_history = [history[0]] + history[-MAX_HISTORY:]
 
-
-    # ── Step 1: LLM ──────────────────────────────────────────────────────────
     t_llm = datetime.now()
-    log("[LLM]", f"ainvoke() | {len(recent_history)} messages")
+    preview = str(recent_history[0].content)[:80] if recent_history else 'NONE'
+    log("[LLM]", f"ainvoke() | {len(recent_history)} messages | sys_prompt_preview='{preview}'")
     try:
         ai_msg = await safe_llm_call(recent_history)
         log("[LLM]", f"Done in {(datetime.now()-t_llm).total_seconds():.2f}s | "
-            f"tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
+            f"tool_calls={len(ai_msg.tool_calls)}")
         print_token_usage(ai_msg, "Initial LLM")
     except Exception as e:
         log("[LLM]", f"FAILED: {e}\n{traceback.format_exc()}")
         raise
 
-    # ── Step 2: Tool loop ─────────────────────────────────────────────────────
     tool_iteration = 0
     while ai_msg.tool_calls:
         tool_iteration += 1
-
         if tool_iteration > MAX_TOOL_ITERATIONS:
-                log("[TOOLS]", f"Max tool iterations reached ({MAX_TOOL_ITERATIONS}). Forcing AI response.")
-                break
-
+            log("[TOOLS]", f"Max tool iterations ({MAX_TOOL_ITERATIONS}). Forcing AI response.")
+            break
         log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
 
         async def execute_tool(tool_call):
             tname = tool_call["name"]
             targs = tool_call["args"]
-            # Inject phone_number for DB integration (ignored if None)
             if phone_number:
                 targs = {**targs, "phone_number": phone_number}
             log("[TOOL]", f"Executing '{tname}' | args={targs}")
-            await websocket.send_json({
-                "type": "tool_call", "name": tname, "args": targs, "status": "running"
-            })
+            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": "running"})
             t_tool = datetime.now()
             try:
                 obs    = await run_tool_async(tname, targs)
                 status = "ok"
-                log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s "
-                    f"| result='{str(obs)[:100]}'")
+                log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s | result='{str(obs)[:100]}'")
             except Exception as e:
                 obs, status = f"Error: {e}", "error"
                 log("[TOOL]", f"'{tname}' FAILED: {e}")
-            await websocket.send_json({
-                "type": "tool_call", "name": tname, "args": targs,
-                "status": status, "observation": str(obs)
-            })
+            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": status, "result": str(obs)})
             return ToolMessage(content=str(obs), tool_call_id=tool_call["id"])
 
-        tool_messages = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
-        history.extend(tool_messages)
-
+        tool_results = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
+        history.extend(tool_results)
         recent_history = [history[0]] + history[-MAX_HISTORY:]
         t_llm2 = datetime.now()
-        log("[LLM]", f"Re-invoking after tool iteration #{tool_iteration}")
+        log("[LLM]", f"Post-tool ainvoke()")
         try:
             ai_msg = await safe_llm_call(recent_history)
-            log("[LLM]", f"Post-tool done in {(datetime.now()-t_llm2).total_seconds():.2f}s | "
-                f"tool_calls={len(ai_msg.tool_calls)} | preview='{str(ai_msg.content)[:80]}'")
-            print_token_usage(ai_msg, f"Post-Tool #{tool_iteration}")
+            log("[LLM]", f"Done in {(datetime.now()-t_llm2).total_seconds():.2f}s")
+            print_token_usage(ai_msg, "Post-tool LLM")
         except Exception as e:
-            log("[LLM]", f"POST-TOOL FAILED: {e}\n{traceback.format_exc()}")
+            log("[LLM]", f"Post-tool FAILED: {e}")
             raise
 
+    reply_text = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
     history.append(ai_msg)
-    reply_text = ai_msg.content
 
-    # ── Step 3: Send full text immediately (chat bubble appears before audio) ─
+    if len(history) > MAX_HISTORY * 2 + 2:
+        history[:] = [history[0]] + history[-(MAX_HISTORY * 2):]
+
     sentences = split_into_sentences(reply_text)
-    log("[TTS]", f"Reply split into {len(sentences)} chunk(s): {[s[:40]+'…' for s in sentences]}")
+    log("[BRAIN]", f"Reply: '{reply_text[:80]}' | {len(sentences)} sentences")
 
-    await websocket.send_json({
-        "type":        "ai_text",
-        "text":        reply_text,
-        "chunk_count": len(sentences)
-    })
-
-    # ── Step 4: Generate + stream TTS chunks sequentially ────────────────────
-    # Sequential (not parallel) keeps audio in correct order without any
-    # reordering logic on the frontend. Each chunk takes ~2 s; the user
-    # hears chunk 1 before chunk 2 is even generated.
-    #
-    # FIX: Tell the frontend (and backend ai_speaking gate) that the AI is
-    # about to speak BEFORE we begin generating TTS.  This closes the race
-    # window where the brain_consumer lock releases (un-muting the mic) while
-    # TTS generation is still running and audio has not yet reached the client.
+    await websocket.send_json({"type": "ai_text", "text": reply_text, "chunk_count": len(sentences)})
     await websocket.send_json({"type": "ai_speaking_start"})
-    log("[TTS]", "ai_speaking_start sent — mic MUTED while TTS generates")
 
-    t_tts_total = datetime.now()
     for idx, sentence in enumerate(sentences):
-        t_chunk = datetime.now()
-        log("[TTS]", f"Chunk {idx+1}/{len(sentences)} start | '{sentence[:60]}'")
-        try:
-            audio_b64 = await tts_convert(sentence)
-            log("[TTS]", f"Chunk {idx+1} ready in {(datetime.now()-t_chunk).total_seconds():.2f}s "
-                f"| b64_len={len(audio_b64)}")
-        except Exception as e:
-            # Skip failed chunks — better to have a short gap than crash everything
-            log("[TTS]", f"Chunk {idx+1} FAILED after retries: {e} — skipping")
-            continue
-
+        log("[TTS]", f"Chunk {idx+1}/{len(sentences)} | speaker={tts_speaker} lang={tts_lang} | '{sentence[:60]}'")
+        audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
         await websocket.send_json({
-            "type":    "audio_chunk",
-            "index":   idx,
-            "total":   len(sentences),
-            "text":    sentence,
-            "audio":   audio_b64,
-            "is_last": idx == len(sentences) - 1
+            "type": "audio_chunk", "index": idx, "total": len(sentences),
+            "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
         })
-        log("[TTS]", f"Chunk {idx+1} sent to frontend")
 
-    log("[TTS]", f"All chunks done | total_tts={( datetime.now()-t_tts_total).total_seconds():.2f}s")
-    log("[BRAIN]", f"COMPLETE in {(datetime.now()-t0).total_seconds():.2f}s total")
-
-    # Signal frontend: no more audio chunks for this response
     await websocket.send_json({"type": "tts_done"})
+    log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
 
 
 # ── Silence warm-up for Sarvam STT ────────────────────────────────────────────
-# 4096 zero int16 samples = 256 ms of silence at 16 kHz.
-# Sending several of these right after a new Sarvam connection primes its
-# acoustic model so the very first real utterance comes back clean instead of
-# producing the "નમસ્કાર × 40" cold-start loop we saw in the logs.
 _SILENCE_FRAME_B64 = base64.b64encode(bytes(4096 * 2)).decode("utf-8")
-_WARMUP_FRAMES = 10   # 10 × 256 ms ≈ 2.5 s — enough to stabilise saaras:v3
+_WARMUP_FRAMES = 10
 
 async def _warmup_sarvam(sarvam_ws, label: str):
     log("[STT_WARMUP]", f"{label} — priming Sarvam with {_WARMUP_FRAMES} silence frames")
     for i in range(_WARMUP_FRAMES):
         try:
             await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
-            await asyncio.sleep(0.04)   # ~40 ms gap so Sarvam processes each frame
+            await asyncio.sleep(0.04)
         except Exception as e:
             log("[STT_WARMUP]", f"Frame {i+1} failed: {e}")
             return False
@@ -546,42 +659,33 @@ async def _warmup_sarvam(sarvam_ws, label: str):
     return True
 
 
-# ── WebSocket ──────────────────────────────────────────────────────────────────
+# ── WebSocket voice handler ────────────────────────────────────────────────────
 @app.websocket("/ws/voice")
-async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] = None):
-    """
-    Voice WebSocket endpoint.
-
-    Architecture:
-      browser_to_sarvam  — reads PCM from browser, handles control msgs,
-                           pushes raw bytes into audio_buf queue
-      sarvam_sender      — pulls from audio_buf, forwards to Sarvam STT.
-                           Automatically reconnects if Sarvam drops the WS.
-                           Each new Sarvam connection is primed with silence
-                           so the first user utterance transcribes cleanly.
-      brain_consumer     — reads committed text from commit_queue, calls LLM+TTS
-
-    Why audio_buf queue? Decouples browser receipt from Sarvam forwarding so
-    reconnects are invisible to the browser task.
-    """
+async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     await websocket.accept()
-    session_id = f"web_{datetime.now().strftime('%H%M%S')}"
-    log("[WS]", f"Connection ACCEPTED | session_id='{session_id}' | phone='{phone_number}'")
-    chat_sessions[session_id] = {"history": [], "phone_number": phone_number}
+    session_id = f"web_{datetime.now().strftime('%H%M%S%f')}"
+    log("[WS]", f"Connection ACCEPTED | session='{session_id}' | phone='{phone_number}'")
+
+    # Session is pre-created with phone from query param; set_user / init can update it
+    chat_sessions[session_id] = {
+        "history":      [],
+        "phone_number": phone_number,
+        "tenant_id":    None,
+        "bot_config":   {},
+    }
 
     brain_lock   = asyncio.Lock()
     ai_speaking  = asyncio.Event()
     commit_queue: asyncio.Queue = asyncio.Queue()
-    # audio_buf holds raw PCM bytes from the browser.
-    # browser_to_sarvam writes; sarvam_sender reads.
-    # It survives Sarvam reconnects — no audio is ever lost.
-    audio_buf: asyncio.Queue = asyncio.Queue(maxsize=300)
+    audio_buf:    asyncio.Queue = asyncio.Queue(maxsize=300)
 
     _recv = _drop_ai = _sent = 0
 
-    # ── Task 1: Browser WebSocket → audio_buf + control messages ─────────────
+    # ── Task 1: Single browser receiver — handles both binary PCM and JSON ctrl ─
+    # IMPORTANT: Only ONE coroutine may call websocket.receive() at a time.
+    # The old split into browser_listener + raw_audio_listener broke this rule.
     async def browser_to_sarvam():
-        nonlocal _recv, _drop_ai, _sent
+        nonlocal _recv, _drop_ai, _sent, phone_number
         log("[AUDIO_TASK]", "browser_to_sarvam() started")
         try:
             while True:
@@ -591,46 +695,74 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                     log("[AUDIO_TASK]", f"Browser disconnected: {e}")
                     break
 
+                # ── JSON control messages ─────────────────────────────────────
                 if "text" in msg:
                     try:
                         ctrl      = json.loads(msg["text"])
                         ctrl_type = ctrl.get("type", "unknown")
-                        if ctrl_type == "ai_speaking_start":
-                            ai_speaking.set()
-                            log("[CTRL]", "ai_speaking_start → mic MUTED")
-                        elif ctrl_type == "ai_speaking_end":
-                            ai_speaking.clear()
-                            log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | "
-                                f"recv={_recv} sent={_sent} drop_ai={_drop_ai}")
-                        elif ctrl_type == "commit_transcript":
-                            text = ctrl.get("text", "").strip()
-                            if text:
-                                log("[COMMIT]", f"Frontend committed: '{text}'")
-                                if ai_speaking.is_set():
-                                    log("[COMMIT]", f"DROPPED (AI speaking — bleed): '{text}'")
-                                elif is_noisy_transcript(text):
-                                    log("[COMMIT]", f"DROPPED (noisy STT): '{text}'")
-                                    await commit_queue.put("__UNCLEAR__")
-                                else:
-                                    await commit_queue.put(text)
+
+                        if ctrl_type == "init":
+                            # New customer UI sends 'init' with session_id, phone, tenant
+                            new_phone   = ctrl.get("phone_number")
+                            tenant_id   = ctrl.get("tenant_id")
+                            new_sess_id = ctrl.get("session_id", session_id)
+                            if new_phone:
+                                phone_number = new_phone
+                                chat_sessions[session_id]["phone_number"] = new_phone
+                            if tenant_id:
+                                chat_sessions[session_id]["tenant_id"] = tenant_id
+                                # Load tenant bot config so the brain uses the right persona
+                                if DB_AVAILABLE:
+                                    try:
+                                        bot_cfg = await asyncio.to_thread(get_bot_config, tenant_id)
+                                        chat_sessions[session_id]["bot_config"] = bot_cfg or {}
+                                        log("[WS]", f"Bot config loaded for tenant={tenant_id}")
+                                    except Exception as cfg_err:
+                                        log("[WS]", f"Bot config load failed: {cfg_err}")
+                            log("[WS]", f"init | session={session_id} phone={phone_number} tenant={tenant_id}")
+
                         elif ctrl_type == "set_user":
+                            # Old-style message — still supported
                             phone = ctrl.get("phone_number")
                             if phone and session_id in chat_sessions:
+                                phone_number = phone
                                 chat_sessions[session_id]["phone_number"] = phone
-                                log("[WS]", f"User phone updated via set_user: {phone}")
+                                log("[WS]", f"set_user phone={phone}")
+
+                        elif ctrl_type == "ai_speaking_start":
+                            ai_speaking.set()
+                            log("[CTRL]", "ai_speaking_start → mic MUTED")
+
+                        elif ctrl_type == "ai_speaking_end":
+                            ai_speaking.clear()
+                            log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
+
+                        elif ctrl_type == "commit_transcript":
+                            text = ctrl.get("text", "").strip()
+                            log("[COMMIT]", f"Received text='{text}' | ai_speaking={ai_speaking.is_set()} | queue_size={commit_queue.qsize()}")
+                            if not text:
+                                log("[COMMIT]", "IGNORED — empty text")
+                            elif ai_speaking.is_set():
+                                log("[COMMIT]", f"DROPPED (AI speaking): '{text}'")
+                            elif is_noisy_transcript(text):
+                                log("[COMMIT]", f"DROPPED (noisy): '{text}' → sending __UNCLEAR__")
+                                await commit_queue.put("__UNCLEAR__")
+                            else:
+                                log("[COMMIT]", f"QUEUED: '{text}'")
+                                await commit_queue.put(text)
                         else:
                             log("[CTRL]", f"Unknown ctrl type='{ctrl_type}'")
                     except Exception as e:
                         log("[CTRL]", f"JSON parse error: {e}")
                     continue
 
+                # ── Raw PCM audio bytes ───────────────────────────────────────
                 if "bytes" in msg:
                     _recv += 1
                     raw = msg["bytes"]
                     if ai_speaking.is_set():
                         _drop_ai += 1
                         continue
-                    # Push to buffer; if full, drop oldest (avoid memory growth)
                     try:
                         audio_buf.put_nowait(raw)
                     except asyncio.QueueFull:
@@ -645,12 +777,6 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
 
     # ── Task 2: audio_buf → Sarvam STT (with automatic reconnect) ────────────
     async def sarvam_sender():
-        """
-        Reads PCM from audio_buf and streams to Sarvam.
-        If Sarvam drops the connection (e.g. idle timeout, network blip),
-        this loop catches the crash, waits briefly, opens a fresh Sarvam WS,
-        primes it with silence, and resumes — all without touching the browser WS.
-        """
         nonlocal _sent
         reconnect_num = 0
         MAX_RECONNECTS = 15
@@ -664,8 +790,6 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                 ) as sarvam_ws:
                     log("[STT_SEND]", f"Sarvam STT ESTABLISHED ({attempt_label})")
 
-                    # ── WARM-UP: send silence to prime acoustic model ──────────
-                    # This is the fix for the "word × 40" cold-start noise.
                     ok = await _warmup_sarvam(sarvam_ws, attempt_label)
                     if not ok:
                         log("[STT_SEND]", "Warm-up failed — will reconnect")
@@ -673,56 +797,33 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                         await asyncio.sleep(1)
                         continue
 
-                    # Tell frontend STT is live (clears any "reconnecting" UI)
                     try:
-                        await websocket.send_json({
-                            "type": "stt_ready",
-                            "reconnect_num": reconnect_num
-                        })
+                        await websocket.send_json({"type": "stt_ready", "reconnect_num": reconnect_num})
                     except Exception:
                         pass
 
-                    # Spawn receiver task for this specific connection
                     recv_task = asyncio.create_task(
                         _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking)
                     )
 
                     try:
-                        # Forward audio → Sarvam until connection dies.
-                        #
-                        # Keep-alive design:
-                        #   We track wall-clock time of the LAST real packet sent.
-                        #   If > KEEPALIVE_INTERVAL seconds pass with no real packet,
-                        #   we send ONE silence frame so Sarvam doesn't idle-close.
-                        #
-                        #   We do NOT use asyncio.wait_for(timeout=30) for this because
-                        #   that 30s clock runs even while the AI is speaking (mic muted,
-                        #   audio_buf empty). The timeout would fire right after unmute —
-                        #   injecting silence frames INTO live user speech and breaking
-                        #   Sarvam's acoustic context. This was the root cause of the
-                        #   word-looping noise seen in the logs.
-                        KEEPALIVE_INTERVAL = 20.0   # seconds between real packets to trigger keep-alive
-                        POLL_INTERVAL      = 0.1    # how often we check the buffer (non-blocking)
+                        KEEPALIVE_INTERVAL = 20.0
+                        POLL_INTERVAL      = 0.1
                         last_real_pkt_time = asyncio.get_event_loop().time()
 
                         while True:
                             try:
                                 raw = audio_buf.get_nowait()
                             except asyncio.QueueEmpty:
-                                # Buffer empty — check if keep-alive is needed
                                 now = asyncio.get_event_loop().time()
                                 idle_s = now - last_real_pkt_time
                                 if idle_s >= KEEPALIVE_INTERVAL and not ai_speaking.is_set():
-                                    # Only send keep-alive when mic is live (not while AI speaking).
-                                    # Sending silence while AI speaks would inject it right
-                                    # after unmute when the buffer drains.
                                     log("[STT_SEND]", f"Keep-alive after {idle_s:.0f}s idle")
                                     await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
-                                    last_real_pkt_time = now   # reset clock after keep-alive
+                                    last_real_pkt_time = now
                                 await asyncio.sleep(POLL_INTERVAL)
                                 continue
 
-                            # Got a real packet
                             last_real_pkt_time = asyncio.get_event_loop().time()
                             await sarvam_ws.transcribe(
                                 audio=base64.b64encode(raw).decode("utf-8")
@@ -747,9 +848,8 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
 
             reconnect_num += 1
             if reconnect_num <= MAX_RECONNECTS:
-                wait_s = min(2 ** reconnect_num, 16)   # exponential back-off capped at 16 s
-                log("[STT_SEND]", f"Reconnecting in {wait_s}s "
-                    f"(attempt {reconnect_num + 1}/{MAX_RECONNECTS})")
+                wait_s = min(2 ** reconnect_num, 16)
+                log("[STT_SEND]", f"Reconnecting in {wait_s}s (attempt {reconnect_num + 1}/{MAX_RECONNECTS})")
                 try:
                     await websocket.send_json({
                         "type": "stt_reconnecting",
@@ -768,7 +868,6 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
 
     # ── Task 2b: Sarvam transcript receiver (one per Sarvam connection) ───────
     async def _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking):
-        """Reads responses from one Sarvam WS and routes finals to commit_queue."""
         log("[STT_RECV]", "Receiver started")
         try:
             p_count = f_count = 0
@@ -781,7 +880,7 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                     continue
 
                 speaking_tag = "AI_SPEAKING" if ai_speaking.is_set() else "user_turn"
-                log("[DIAG:STT]", f"{'FINAL' if is_final else 'partial'} [{speaking_tag}]: '{transcript}'")
+                log("[DIAG:STT]", f"{'FINAL' if is_final else 'partial'} [{speaking_tag}]: '{transcript}' | noisy={is_noisy_transcript(transcript)}")
 
                 if is_final:
                     f_count += 1
@@ -805,7 +904,7 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
                         "is_final": is_final
                     })
                 except Exception:
-                    pass   # browser disconnected; sarvam_sender will handle
+                    pass
 
         except asyncio.CancelledError:
             log("[STT_RECV]", "Receiver cancelled (Sarvam reconnect in progress)")
@@ -819,7 +918,7 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
         while True:
             try:
                 sentence = await commit_queue.get()
-                log("[BRAIN_CONSUMER]", f"Dequeued: '{sentence}'")
+                log("[BRAIN_CONSUMER]", f"Dequeued from queue: '{sentence}' | brain_locked={brain_lock.locked()}")
                 if brain_lock.locked():
                     log("[BRAIN_CONSUMER]", "Brain BUSY — dropping sentence")
                     continue
@@ -865,7 +964,6 @@ async def websocket_endpoint(websocket: WebSocket, phone_number: Optional[str] =
     log("[WS]", "All tasks exited")
 
 
-# ── Audio helpers ──────────────────────────────────────────────────────────────
 def compute_rms(raw_bytes: bytes) -> float:
     if len(raw_bytes) < 2:
         return 0.0
