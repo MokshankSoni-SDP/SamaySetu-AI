@@ -19,7 +19,26 @@ from typing import Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 import prompts
+import calendar_tool
 from calendar_tool import *
+
+
+# ── Tenant Context ───────────────────────────────────────────────────────────
+class TenantContext:
+    """Lightweight carrier that tells calendar_tool which session is active."""
+    session_id: Optional[str] = None
+    chat_sessions: Optional[dict] = None
+
+tenant_context = TenantContext()
+
+
+def get_current_tenant() -> Optional[str]:
+    """Return the tenant_id for the active session, or None."""
+    if not tenant_context.chat_sessions or not tenant_context.session_id:
+        return None
+    session = tenant_context.chat_sessions.get(tenant_context.session_id)
+    return session.get("tenant_id") if session else None
+
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from datetime import datetime, date
@@ -592,7 +611,11 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
             targs = tool_call["args"]
             if phone_number:
                 targs = {**targs, "phone_number": phone_number}
-            log("[TOOL]", f"Executing '{tname}' | args={targs}")
+            # ── Inject tenant context so calendar_tool uses the correct tenant_id ─
+            tenant_context.session_id    = session_id
+            tenant_context.chat_sessions = chat_sessions
+            calendar_tool.tenant_context = tenant_context
+            log("[TOOL]", f"Executing '{tname}' | args={targs} | tenant={get_current_tenant()}")
             await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": "running"})
             t_tool = datetime.now()
             try:

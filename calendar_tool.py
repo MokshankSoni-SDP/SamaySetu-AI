@@ -9,6 +9,22 @@ from typing import Optional
 
 load_dotenv()
 
+# ── Tenant Context (injected by main.py before every tool call) ──────────────
+# This module-level variable is set by main.py so that every tool function can
+# retrieve the correct tenant_id without it being passed as a tool argument.
+tenant_context = None
+
+
+def get_session_context():
+    """Return (tenant_id, phone_number) from the active WebSocket session.
+    Returns (None, None) if context hasn't been injected yet."""
+    if tenant_context is None:
+        return None, None
+    session = tenant_context.chat_sessions.get(tenant_context.session_id)
+    if not session:
+        return None, None
+    return session.get("tenant_id"), session.get("phone_number")
+
 # ── DB integration (optional — degrades gracefully if psycopg2 missing) ──────
 try:
     from database.crud import (
@@ -129,13 +145,19 @@ def book_appointment(
     phone_number: Optional[str] = None,
 ):
     """Books a Google Calendar event and stores the appointment in the DB."""
+    # ── Resolve tenant + phone from session context ────────────────────────
+    ctx_tenant_id, ctx_phone = get_session_context()
+    if not phone_number:
+        phone_number = ctx_phone
+    tenant_id = ctx_tenant_id
+
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
 
     availability = check_calendar_availability(start_time_str)
     if "BUSY" in availability:
         return "Error: Slot already occupied."
-    
+
     display_summary = f"{summary} - {phone_number}" if phone_number else summary
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
@@ -151,7 +173,7 @@ def book_appointment(
     created_event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
     calendar_event_id = created_event.get('id')
 
-    # ── DB write: store appointment linked to user ──────────────────────────
+    # ── DB write: store appointment linked to tenant + user ────────────────
     if phone_number and calendar_event_id:
         _try_db(
             create_appointment,
@@ -159,7 +181,9 @@ def book_appointment(
             naive_dt.strftime('%Y-%m-%dT%H:%M:%S'),
             end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
             calendar_event_id,
+            tenant_id,          # always pass tenant_id for strict isolation
         )
+        print(f"[TENANT] book_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return "SUCCESS: Appointment booked."
 
@@ -188,23 +212,26 @@ def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
     BOOKED appointment exists for THAT user before we touch Google Calendar.
     This prevents User B from cancelling an appointment owned by User A.
     """
+    # ── Resolve tenant + phone from session context ────────────────────────
+    ctx_tenant_id, ctx_phone = get_session_context()
+    if not phone_number:
+        phone_number = ctx_phone
+    tenant_id = ctx_tenant_id
 
     if is_past_time(start_time_str):
         return "Error: Cannot cancel a past appointment."
 
-    # ── 1. Ownership check (DB guard) ─────────────────────────────────────────
+    # ── 1. Ownership check (DB guard — scoped to tenant) ──────────────────
     if phone_number:
-        owns = _try_db(user_owns_appointment, phone_number, start_time_str)
+        owns = _try_db(user_owns_appointment, phone_number, start_time_str, tenant_id)
         if not owns:  # False = checked DB and found nothing; None = DB unavailable
             return (f"Error: No appointment found for your account at {start_time_str}. "
                     "Please check the time and try again.")
 
-    # ── 2. Get the Google Calendar event_id ──────────────────────────────────
+    # ── 2. Get the Google Calendar event_id (scoped to tenant) ────────────
     event_id = None
     if phone_number:
-        event_id = _try_db(get_calendar_event_id, phone_number, start_time_str)
-    # if not event_id:
-    #     event_id = find_event_id(start_time_str)   # fallback: search calendar
+        event_id = _try_db(get_calendar_event_id, phone_number, start_time_str, tenant_id)
     if not event_id:
         return f"Error: No calendar event found at {start_time_str} to cancel."
 
@@ -213,6 +240,7 @@ def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
 
     # ── 4. Update DB status (match by event_id — avoids TIMESTAMP cast issues)
     _try_db(update_status_by_event_id, event_id, "CANCELLED")
+    print(f"[TENANT] cancel_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
 
@@ -227,23 +255,26 @@ def reschedule_appointment(
     User-isolation guard: same as cancel_appointment — DB must confirm ownership
     before any Google Calendar operation is attempted.
     """
+    # ── Resolve tenant + phone from session context ────────────────────────
+    ctx_tenant_id, ctx_phone = get_session_context()
+    if not phone_number:
+        phone_number = ctx_phone
+    tenant_id = ctx_tenant_id
 
     if is_past_time(new_start_time_str):
         return "Error: Cannot reschedule to a past time."
 
-    # ── 1. Ownership check (DB guard) ─────────────────────────────────────────
+    # ── 1. Ownership check (DB guard — scoped to tenant) ──────────────────
     if phone_number:
-        owns = _try_db(user_owns_appointment, phone_number, old_start_time_str)
+        owns = _try_db(user_owns_appointment, phone_number, old_start_time_str, tenant_id)
         if not owns:
             return (f"Error: No appointment found for your account at {old_start_time_str}. "
                     "Please check the time and try again.")
 
-    # ── 2. Get the Google Calendar event_id ──────────────────────────────────
+    # ── 2. Get the Google Calendar event_id (scoped to tenant) ────────────
     event_id = None
     if phone_number:
-        event_id = _try_db(get_calendar_event_id, phone_number, old_start_time_str)
-    # if not event_id:
-    #     event_id = find_event_id(old_start_time_str)  # fallback
+        event_id = _try_db(get_calendar_event_id, phone_number, old_start_time_str, tenant_id)
     if not event_id:
         return f"Error: No appointment found at {old_start_time_str}."
 
@@ -263,7 +294,7 @@ def reschedule_appointment(
 
     service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
 
-    # ── 5. Update DB: new times + RESCHEDULED status ──────────────────────────
+    # ── 5. Update DB: new times + RESCHEDULED status (scoped to tenant) ───
     if phone_number:
         _try_db(
             update_rescheduled_appointment,
@@ -271,7 +302,9 @@ def reschedule_appointment(
             old_start_time_str,
             new_start_time_str,
             new_end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            tenant_id,          # always pass tenant_id for strict isolation
         )
+        print(f"[TENANT] reschedule_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return f"SUCCESS: Appointment moved from {old_start_time_str} to {new_start_time_str}."
 
