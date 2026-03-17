@@ -1,23 +1,42 @@
+"""
+calendar_tool.py
+----------------
+Multi-tenant Google Calendar tools for SamaySetu AI.
+
+All Google API calls are now routed through services/calendar_provider.py,
+which loads per-tenant credentials from the DB at call time.
+
+The old module-level globals (SERVICE_ACCOUNT_FILE, CALENDAR_ID, `service`)
+have been removed entirely. Every function now resolves the tenant from the
+active WebSocket session context and fetches the correct calendar client.
+"""
+
 import datetime
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 import os
 import pytz
+from typing import Optional
 from dotenv import load_dotenv
 import config
-from typing import Optional
 
 load_dotenv()
 
-# ── Tenant Context (injected by main.py before every tool call) ──────────────
-# This module-level variable is set by main.py so that every tool function can
-# retrieve the correct tenant_id without it being passed as a tool argument.
+# ── Per-tenant calendar client ────────────────────────────────────────────────
+from services.calendar_provider import (
+    get_calendar_service,
+    CalendarNotConnectedError,
+    InvalidCalendarCredentialsError,
+)
+
+# ── Tenant Context (injected by main.py before every tool call) ───────────────
+# main.py sets `calendar_tool.tenant_context` before calling any tool so every
+# function knows which tenant (and which phone number) is active — without
+# needing those values as explicit tool arguments.
 tenant_context = None
 
 
 def get_session_context():
     """Return (tenant_id, phone_number) from the active WebSocket session.
-    Returns (None, None) if context hasn't been injected yet."""
+    Returns (None, None) if context has not been injected yet."""
     if tenant_context is None:
         return None, None
     session = tenant_context.chat_sessions.get(tenant_context.session_id)
@@ -25,7 +44,20 @@ def get_session_context():
         return None, None
     return session.get("tenant_id"), session.get("phone_number")
 
-# ── DB integration (optional — degrades gracefully if psycopg2 missing) ──────
+
+def _get_service_and_calendar(tenant_id: str):
+    """
+    Thin wrapper so every tool function gets (service, calendar_id) in one line
+    and surfaces a clear error when the calendar is not connected.
+    """
+    if not tenant_id:
+        raise CalendarNotConnectedError(
+            "No tenant context available — cannot identify which calendar to use."
+        )
+    return get_calendar_service(tenant_id)
+
+
+# ── DB integration (optional — degrades gracefully if psycopg2 missing) ───────
 try:
     from database.crud import (
         create_appointment,
@@ -50,93 +82,97 @@ def _try_db(fn, *args, **kwargs):
         print(f"[DB] Non-fatal DB error in calendar_tool: {e}")
         return None
 
-SERVICE_ACCOUNT_FILE = 'service_account.json'
-# NOTE (multi-tenant upgrade path):
-# Right now this file is loaded once at startup for ALL tenants.
-# When you want per-tenant calendars, replace this with a function that
-# reads the service_account JSON from the calendar_tokens table (see crud.py)
-# and builds credentials dynamically per tenant_id.
-# For now: keep your service_account.json in the project root as before.
-CALENDAR_ID = os.getenv('CALENDER_ID')
-
-# UPDATED: Changed from .readonly to allow event creation
-SCOPES = ['https://www.googleapis.com/auth/calendar']
-creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-service = build('calendar', 'v3', credentials=creds)
 
 IST = pytz.timezone(config.CALENDAR_TIMEZONE)
 
-def is_past_time(start_time_str: str):
+
+def is_past_time(start_time_str: str) -> bool:
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
     now_dt = datetime.datetime.now(IST)
     return start_dt <= now_dt
 
-def check_calendar_availability(start_time_str: str,duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,phone_number: Optional[str] = None):
-    """Checks if a 30-minute slot is free in Google Calendar."""
+
+def is_within_business_hours(start_time_str: str) -> bool:
+    naive_dt = datetime.datetime.fromisoformat(start_time_str)
+    hour = naive_dt.hour
+    return config.BUSINESS_START_HOUR <= hour < config.BUSINESS_END_HOUR
+
+
+# ── Tool: check_calendar_availability ────────────────────────────────────────
+
+def check_calendar_availability(
+    start_time_str: str,
+    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    phone_number: Optional[str] = None,
+):
+    """Checks if a time slot is free in this tenant's Google Calendar."""
+    tenant_id, _ = get_session_context()
 
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
-    
-    # NEW: Business Hours Check
+
     if not is_within_business_hours(start_time_str):
-        return (f"Error: We only accept appointments between {config.BUSINESS_START_HOUR}:00 AM "
-                f"and {config.BUSINESS_END_HOUR}:00 PM. Please choose a different time.")
+        return (
+            f"Error: We only accept appointments between "
+            f"{config.BUSINESS_START_HOUR}:00 AM and {config.BUSINESS_END_HOUR}:00 PM. "
+            "Please choose a different time."
+        )
+
+    try:
+        service, calendar_id = _get_service_and_calendar(tenant_id)
+    except (CalendarNotConnectedError, InvalidCalendarCredentialsError) as e:
+        return f"Error: Calendar not available — {e}"
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
     end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
-    
+
     body = {
-        "timeMin": start_dt.isoformat() ,
-        "timeMax": end_dt.isoformat() ,
-        "items": [{"id": CALENDAR_ID}]
+        "timeMin": start_dt.isoformat(),
+        "timeMax": end_dt.isoformat(),
+        "items": [{"id": calendar_id}],
     }
-    
+
     query = service.freebusy().query(body=body).execute()
-    busy_slots = query['calendars'][CALENDAR_ID]['busy']
-    
+    busy_slots = query["calendars"][calendar_id]["busy"]
+
     if not busy_slots:
         return f"Slot {start_time_str} is FREE."
     else:
         return f"Slot {start_time_str} is BUSY."
 
 
+# ── Tool: suggest_next_available_slot ────────────────────────────────────────
+
 def suggest_next_available_slot(
     start_time_str: str,
     duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
     search_hours: int = 4,
     max_slots: int = 3,
-    phone_number: Optional[str] = None
+    phone_number: Optional[str] = None,
 ):
-
+    """Returns up to max_slots free slots starting from start_time_str."""
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
-
     end_search = start_dt + datetime.timedelta(hours=search_hours)
-
     current = start_dt + datetime.timedelta(minutes=duration_minutes)
-
     available_slots = []
 
     while current < end_search and len(available_slots) < max_slots:
-
         availability = check_calendar_availability(
-            current.strftime("%Y-%m-%dT%H:%M:%S"),
-            duration_minutes
+            current.strftime("%Y-%m-%dT%H:%M:%S"), duration_minutes
         )
-
         if "FREE" in availability:
-            available_slots.append(
-                current.strftime("%Y-%m-%dT%H:%M:%S")
-            )
-
+            available_slots.append(current.strftime("%Y-%m-%dT%H:%M:%S"))
         current += datetime.timedelta(minutes=duration_minutes)
 
     if available_slots:
         return f"AVAILABLE_SLOTS: {available_slots}"
-
     return "No available slots found in the next few hours."
+
+
+# ── Tool: book_appointment ────────────────────────────────────────────────────
 
 def book_appointment(
     start_time_str: str,
@@ -144,8 +180,7 @@ def book_appointment(
     duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
     phone_number: Optional[str] = None,
 ):
-    """Books a Google Calendar event and stores the appointment in the DB."""
-    # ── Resolve tenant + phone from session context ────────────────────────
+    """Books a Google Calendar event for this tenant and stores the appointment in the DB."""
     ctx_tenant_id, ctx_phone = get_session_context()
     if not phone_number:
         phone_number = ctx_phone
@@ -157,62 +192,61 @@ def book_appointment(
     availability = check_calendar_availability(start_time_str)
     if "BUSY" in availability:
         return "Error: Slot already occupied."
+    if "Error" in availability:
+        return availability   # propagate calendar-not-connected errors cleanly
+
+    try:
+        service, calendar_id = _get_service_and_calendar(tenant_id)
+    except (CalendarNotConnectedError, InvalidCalendarCredentialsError) as e:
+        return f"Error: Calendar not available — {e}"
 
     display_summary = f"{summary} - {phone_number}" if phone_number else summary
 
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
-    end_dt   = naive_dt + datetime.timedelta(minutes=duration_minutes)
+    end_dt = naive_dt + datetime.timedelta(minutes=duration_minutes)
 
     event = {
-        'summary': display_summary,
-        'description': 'Booked via SamaySetu Gujarati AI Bot',
-        'start': {'dateTime': naive_dt.strftime('%Y-%m-%dT%H:%M:%S'), 'timeZone': 'Asia/Kolkata'},
-        'end':   {'dateTime': end_dt.strftime('%Y-%m-%dT%H:%M:%S'),   'timeZone': 'Asia/Kolkata'},
+        "summary": display_summary,
+        "description": "Booked via SamaySetu Gujarati AI Bot",
+        "start": {
+            "dateTime": naive_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timeZone": "Asia/Kolkata",
+        },
+        "end": {
+            "dateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timeZone": "Asia/Kolkata",
+        },
     }
 
-    created_event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
-    calendar_event_id = created_event.get('id')
+    created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
+    calendar_event_id = created_event.get("id")
 
-    # ── DB write: store appointment linked to tenant + user ────────────────
     if phone_number and calendar_event_id:
         _try_db(
             create_appointment,
             phone_number,
-            naive_dt.strftime('%Y-%m-%dT%H:%M:%S'),
-            end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            naive_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
             calendar_event_id,
-            tenant_id,          # always pass tenant_id for strict isolation
+            tenant_id,
         )
         print(f"[TENANT] book_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return "SUCCESS: Appointment booked."
 
-def find_event_id(start_time_str: str):
-    """Helper to find an event ID based on a start time."""
-    naive_dt = datetime.datetime.fromisoformat(start_time_str)
-    start_dt = IST.localize(naive_dt)
-    # Search window: 1 minute before/after to be safe
-    time_min = (start_dt - datetime.timedelta(minutes=1)).isoformat()
-    time_max = (start_dt + datetime.timedelta(minutes=1)).isoformat()
 
-    events_result = service.events().list(
-        calendarId=CALENDAR_ID,
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True
-    ).execute()
-    
-    events = events_result.get('items', [])
-    return events[0]['id'] if events else None
+# ── Tool: cancel_appointment ──────────────────────────────────────────────────
 
-def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
-    """Deletes an appointment at the given start time.
-
-    User-isolation guard: if a phone_number is known, the DB must confirm a
-    BOOKED appointment exists for THAT user before we touch Google Calendar.
-    This prevents User B from cancelling an appointment owned by User A.
+def cancel_appointment(
+    start_time_str: str,
+    phone_number: Optional[str] = None,
+):
     """
-    # ── Resolve tenant + phone from session context ────────────────────────
+    Deletes a tenant-scoped appointment from Google Calendar and marks it CANCELLED in the DB.
+
+    Ownership guard: the DB must confirm a BOOKED appointment exists for THIS
+    user before any Google Calendar operation is attempted.
+    """
     ctx_tenant_id, ctx_phone = get_session_context()
     if not phone_number:
         phone_number = ctx_phone
@@ -221,28 +255,38 @@ def cancel_appointment(start_time_str: str, phone_number: Optional[str] = None):
     if is_past_time(start_time_str):
         return "Error: Cannot cancel a past appointment."
 
-    # ── 1. Ownership check (DB guard — scoped to tenant) ──────────────────
+    # 1. Ownership check
     if phone_number:
         owns = _try_db(user_owns_appointment, phone_number, start_time_str, tenant_id)
-        if not owns:  # False = checked DB and found nothing; None = DB unavailable
-            return (f"Error: No appointment found for your account at {start_time_str}. "
-                    "Please check the time and try again.")
+        if not owns:
+            return (
+                f"Error: No appointment found for your account at {start_time_str}. "
+                "Please check the time and try again."
+            )
 
-    # ── 2. Get the Google Calendar event_id (scoped to tenant) ────────────
+    # 2. Get Google Calendar event_id from DB
     event_id = None
     if phone_number:
         event_id = _try_db(get_calendar_event_id, phone_number, start_time_str, tenant_id)
     if not event_id:
         return f"Error: No calendar event found at {start_time_str} to cancel."
 
-    # ── 3. Delete from Google Calendar ───────────────────────────────────────
-    service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+    # 3. Delete from Google Calendar
+    try:
+        service, calendar_id = _get_service_and_calendar(tenant_id)
+    except (CalendarNotConnectedError, InvalidCalendarCredentialsError) as e:
+        return f"Error: Calendar not available — {e}"
 
-    # ── 4. Update DB status (match by event_id — avoids TIMESTAMP cast issues)
+    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+
+    # 4. Mark CANCELLED in DB
     _try_db(update_status_by_event_id, event_id, "CANCELLED")
     print(f"[TENANT] cancel_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return f"SUCCESS: Appointment at {start_time_str} has been cancelled."
+
+
+# ── Tool: reschedule_appointment ──────────────────────────────────────────────
 
 def reschedule_appointment(
     old_start_time_str: str,
@@ -250,12 +294,11 @@ def reschedule_appointment(
     duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
     phone_number: Optional[str] = None,
 ):
-    """Moves an appointment from an old time to a new time.
-
-    User-isolation guard: same as cancel_appointment — DB must confirm ownership
-    before any Google Calendar operation is attempted.
     """
-    # ── Resolve tenant + phone from session context ────────────────────────
+    Moves a tenant-scoped appointment from an old time slot to a new one.
+
+    Ownership guard: same as cancel_appointment.
+    """
     ctx_tenant_id, ctx_phone = get_session_context()
     if not phone_number:
         phone_number = ctx_phone
@@ -264,55 +307,55 @@ def reschedule_appointment(
     if is_past_time(new_start_time_str):
         return "Error: Cannot reschedule to a past time."
 
-    # ── 1. Ownership check (DB guard — scoped to tenant) ──────────────────
+    # 1. Ownership check
     if phone_number:
         owns = _try_db(user_owns_appointment, phone_number, old_start_time_str, tenant_id)
         if not owns:
-            return (f"Error: No appointment found for your account at {old_start_time_str}. "
-                    "Please check the time and try again.")
+            return (
+                f"Error: No appointment found for your account at {old_start_time_str}. "
+                "Please check the time and try again."
+            )
 
-    # ── 2. Get the Google Calendar event_id (scoped to tenant) ────────────
+    # 2. Get event_id from DB
     event_id = None
     if phone_number:
         event_id = _try_db(get_calendar_event_id, phone_number, old_start_time_str, tenant_id)
     if not event_id:
         return f"Error: No appointment found at {old_start_time_str}."
 
-    # ── 3. Check new slot is free ─────────────────────────────────────────────
+    # 3. Check new slot is free
     availability = check_calendar_availability(new_start_time_str)
     if "BUSY" in availability:
         return f"Error: The new slot {new_start_time_str} is already occupied."
+    if "Error" in availability:
+        return availability
 
-    # ── 4. Update Google Calendar event ──────────────────────────────────────
-    event = service.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
+    # 4. Update Google Calendar event
+    try:
+        service, calendar_id = _get_service_and_calendar(tenant_id)
+    except (CalendarNotConnectedError, InvalidCalendarCredentialsError) as e:
+        return f"Error: Calendar not available — {e}"
+
+    event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
 
     new_naive_dt = datetime.datetime.fromisoformat(new_start_time_str)
-    new_end_dt   = new_naive_dt + datetime.timedelta(minutes=duration_minutes)
+    new_end_dt = new_naive_dt + datetime.timedelta(minutes=duration_minutes)
 
-    event['start']['dateTime'] = new_naive_dt.strftime('%Y-%m-%dT%H:%M:%S')
-    event['end']['dateTime']   = new_end_dt.strftime('%Y-%m-%dT%H:%M:%S')
+    event["start"]["dateTime"] = new_naive_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    event["end"]["dateTime"] = new_end_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
-    service.events().update(calendarId=CALENDAR_ID, eventId=event_id, body=event).execute()
+    service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
 
-    # ── 5. Update DB: new times + RESCHEDULED status (scoped to tenant) ───
+    # 5. Update DB
     if phone_number:
         _try_db(
             update_rescheduled_appointment,
             phone_number,
             old_start_time_str,
             new_start_time_str,
-            new_end_dt.strftime('%Y-%m-%dT%H:%M:%S'),
-            tenant_id,          # always pass tenant_id for strict isolation
+            new_end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            tenant_id,
         )
         print(f"[TENANT] reschedule_appointment: tenant_id={tenant_id} phone={phone_number}")
 
     return f"SUCCESS: Appointment moved from {old_start_time_str} to {new_start_time_str}."
-
-def is_within_business_hours(start_time_str: str):
-    naive_dt = datetime.datetime.fromisoformat(start_time_str)
-    hour = naive_dt.hour
-    
-    # Check if the time falls between 9 AM and 6 PM
-    if config.BUSINESS_START_HOUR <= hour < config.BUSINESS_END_HOUR:
-        return True
-    return False

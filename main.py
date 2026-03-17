@@ -15,13 +15,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sarvamai import AsyncSarvamAI
 from dotenv import load_dotenv
+load_dotenv()
+
 from typing import Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from services.calendar_provider import verify_calendar_connection
 
 import prompts
 import calendar_tool
 from calendar_tool import *
-
 
 # ── Tenant Context ───────────────────────────────────────────────────────────
 class TenantContext:
@@ -74,9 +76,6 @@ except ImportError as _db_import_err:
 def log(step: str, msg: str):
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{ts}] {step}: {msg}")
-
-
-load_dotenv()
 
 
 @asynccontextmanager
@@ -406,39 +405,88 @@ async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_
 
 
 @app.post("/admin/calendar/connect")
-async def admin_connect_calendar(req: CalendarConnectRequest,
-                                  session=Depends(_check_admin_token)):
+async def admin_connect_calendar(
+    req: CalendarConnectRequest,
+    session=Depends(_check_admin_token),
+):
     """
-    Store Google Calendar credentials for this tenant.
-    The frontend submits a service_account JSON string + the calendar ID.
-    The backend stores it and uses it for subsequent calendar operations.
+    Store Google Calendar credentials for this tenant AND verify they work.
+ 
+    Steps:
+      1. Validate the submitted JSON is parseable.
+      2. Save credentials to the DB.
+      3. Call the Google Calendar freebusy API to confirm the service account
+         can actually access the calendar.
+      4. Return connected=True only when step 3 succeeds; otherwise return an
+         actionable error so the admin knows what to fix.
     """
     tenant_id = session["tenant_id"]
     if not DB_AVAILABLE:
         raise HTTPException(status_code=503, detail="Database unavailable")
-    # Validate the JSON is parseable
+ 
+    # Step 1 — validate JSON shape
     try:
         json.loads(req.service_account_json)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid service account JSON")
-    token = await asyncio.to_thread(
+ 
+    # Step 2 — persist to DB
+    await asyncio.to_thread(
         save_calendar_token, tenant_id, req.calendar_id, req.service_account_json
     )
-    # Also update bot_config with calendar_id for quick access
     await asyncio.to_thread(upsert_bot_config, tenant_id, calendar_id=req.calendar_id)
-    return {"status": "connected", "calendar_id": req.calendar_id}
+ 
+    # Step 3 — live verification against Google Calendar API
+    result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
+    if not result["ok"]:
+        # Credentials saved but verification failed — tell the admin why
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Credentials saved but Google Calendar verification failed: "
+                f"{result['error']}. "
+                "Check that the service account has been shared with this calendar."
+            ),
+        )
+ 
+    # Step 4 — all good
+    return {
+        "status": "connected",
+        "verified": True,
+        "calendar_id": req.calendar_id,
+    }
 
 
 @app.get("/admin/calendar/status")
 async def admin_calendar_status(session=Depends(_check_admin_token)):
+    """
+    Returns real-time calendar connection status by actually calling Google.
+    'connected: true' means credentials exist AND Google accepted them just now.
+    """
     tenant_id = session["tenant_id"]
     if not DB_AVAILABLE:
         return {"connected": False}
+ 
     token = await asyncio.to_thread(get_calendar_token, tenant_id)
-    if token:
-        return {"connected": True, "calendar_id": token["calendar_id"],
-                "connected_at": token["connected_at"]}
-    return {"connected": False}
+    if not token:
+        return {"connected": False}
+ 
+    # Run a live check instead of just returning "row exists"
+    result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
+    if result["ok"]:
+        return {
+            "connected": True,
+            "verified": True,
+            "calendar_id": token["calendar_id"],
+            "connected_at": token.get("connected_at"),
+        }
+    else:
+        return {
+            "connected": False,
+            "verified": False,
+            "calendar_id": token["calendar_id"],
+            "error": result["error"],
+        }
 
 
 # ── Superadmin (SamaySetu platform owner) endpoints ──────────────────────────
