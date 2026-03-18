@@ -45,6 +45,14 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from datetime import datetime, date
 
+GROQ_SMALL_LLM_KEY = os.getenv("GROQ_SMALL_LLM")
+
+small_llm = ChatGroq(
+    api_key=GROQ_SMALL_LLM_KEY,
+    model="llama-3.1-8b-instant",   # or any 8B Groq model
+    temperature=0
+)
+
 # ── Database imports ────────────────────────────────────────────────────────
 try:
     from database.models import create_tables
@@ -589,6 +597,35 @@ async def tts_convert(text: str, speaker: str = "simran", lang: str = "gu-IN") -
 async def safe_llm_call(messages):
     return await llm_with_tools.ainvoke(messages)
 
+async def extract_memory(user_text: str, memory: dict):
+    try:
+        prompt = prompts.get_memory_extraction_prompt()
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        messages = [
+            SystemMessage(content=prompt),
+            HumanMessage(content=f"""
+                    Today date: {today}
+
+                    Current memory:
+                    {json.dumps(memory)}
+                    
+                    User input:
+                    {user_text}
+                    """)
+        ]
+
+        response = await small_llm.ainvoke(messages)
+
+        extracted = safe_json_parse(response.content)
+
+        return extracted
+
+    except Exception as e:
+        print("[MEMORY] Extraction failed:", e)
+        return {}
+
 async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
@@ -616,8 +653,23 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         return
 
     if session_id not in chat_sessions:
-        chat_sessions[session_id] = {"history": [], "phone_number": None,
-                                      "tenant_id": None, "bot_config": None}
+        chat_sessions[session_id] = {"history": [],
+                                     "phone_number": None,
+                                     "tenant_id": None,
+                                     "bot_config": None,
+                                     "memory":{
+                                        "intent": None,
+                                            "pending_action": None,
+                                            "appointment": {
+                                                "date": None,
+                                                "time": None,
+                                                "duration": None
+                                            },
+                                            "reschedule": {
+                                                "old_time": None,
+                                                "new_time": None
+                                            }
+                                     }}
 
     session_data = chat_sessions[session_id]
     history      = session_data["history"]
@@ -626,12 +678,31 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     tts_speaker  = bot_config.get("tts_speaker", "simran")
     tts_lang     = bot_config.get("language_code", "gu-IN")
 
-    if not history or not isinstance(history[0], SystemMessage):
-        log("[BRAIN]", f"Injecting system prompt | today={today} day={day}")
-        history.insert(0, SystemMessage(content=prompts.get_system_prompt(today, day, bot_config)))
+    memory = session_data.get("memory", {})
+    
+    # Extract memory using small LLM
+    new_memory = await extract_memory(user_text, memory)
+    
+    # Merge memory
+    updated_memory = merge_memory(memory, new_memory)
+    
+    print(updated_memory)
+    # Save back
+    session_data["memory"] = updated_memory
+
+    memory_context = f"\n\n=== MEMORY STATE ===\n{json.dumps(session_data.get('memory', {}))}"
+
+    system_prompt = prompts.get_system_prompt(today, day, bot_config) + memory_context
+
+    if history and isinstance(history[0], SystemMessage):
+        history[0] = SystemMessage(content=system_prompt)
+    else:
+        history.insert(0, SystemMessage(content=system_prompt))
 
     history.append(HumanMessage(content=user_text))
     recent_history = [history[0]] + history[-MAX_HISTORY:]
+
+    log("[MEMORY]", f"Updated: {updated_memory}")
 
     t_llm = datetime.now()
     preview = str(recent_history[0].content)[:80] if recent_history else 'NONE'
@@ -668,6 +739,9 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
             t_tool = datetime.now()
             try:
                 obs    = await run_tool_async(tname, targs)
+                if "SUCCESS" in str(obs):
+                    print("$$$state memory deleted after success$$$")
+                    session_data["memory"]["pending_action"] = None
                 status = "ok"
                 log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s | result='{str(obs)[:100]}'")
             except Exception as e:
@@ -1075,3 +1149,21 @@ def compute_rms(raw_bytes: bytes) -> float:
         return 0.0
     samples = struct.unpack(f"<{len(raw_bytes)//2}h", raw_bytes)
     return (sum(s * s for s in samples) / len(samples)) ** 0.5
+
+def merge_memory(old, new):
+    for key, value in new.items():
+        if isinstance(value, dict):
+            old[key] = merge_memory(old.get(key, {}), value)
+        else:
+            if value is not None:
+                old[key] = value
+    return old
+
+def safe_json_parse(text):
+    try:
+        return json.loads(text)
+    except:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
