@@ -203,7 +203,7 @@ admin_sessions: Dict[str, dict] = {}
 superadmin_sessions: Dict[str, dict] = {}
 
 MAX_HISTORY = 5
-MAX_TOOL_ITERATIONS = 4
+MAX_TOOL_ITERATIONS = 2
 
 # Gujarati number words → digits
 GUJ_NUMBERS = {

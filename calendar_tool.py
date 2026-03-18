@@ -152,25 +152,61 @@ def suggest_next_available_slot(
     max_slots: int = 3,
     phone_number: Optional[str] = None,
 ):
-    """Returns up to max_slots free slots starting from start_time_str."""
+    tenant_id, _ = get_session_context()
+
+    try:
+        service, calendar_id = _get_service_and_calendar(tenant_id)
+    except Exception as e:
+        return f"Error: Calendar not available — {e}"
+
+    # Parse time
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
     end_search = start_dt + datetime.timedelta(hours=search_hours)
-    current = start_dt + datetime.timedelta(minutes=duration_minutes)
+
+    # 🔥 SINGLE API CALL
+    body = {
+        "timeMin": start_dt.isoformat(),
+        "timeMax": end_search.isoformat(),
+        "items": [{"id": calendar_id}],
+    }
+
+    query = service.freebusy().query(body=body).execute()
+    busy_slots = query["calendars"][calendar_id]["busy"]
+
+    # Convert busy slots to datetime
+    busy_intervals = []
+    for slot in busy_slots:
+        busy_start = datetime.datetime.fromisoformat(slot["start"])
+        busy_end = datetime.datetime.fromisoformat(slot["end"])
+        busy_intervals.append((busy_start, busy_end))
+
+    # Sort intervals (important)
+    busy_intervals.sort()
+
+    # 🧠 FIND FREE SLOTS LOCALLY
     available_slots = []
+    current = start_dt
 
     while current < end_search and len(available_slots) < max_slots:
-        availability = check_calendar_availability(
-            current.strftime("%Y-%m-%dT%H:%M:%S"), duration_minutes
-        )
-        if "FREE" in availability:
+        end_time = current + datetime.timedelta(minutes=duration_minutes)
+
+        # Check overlap with any busy slot
+        is_busy = False
+        for busy_start, busy_end in busy_intervals:
+            if not (end_time <= busy_start or current >= busy_end):
+                is_busy = True
+                break
+
+        if not is_busy:
             available_slots.append(current.strftime("%Y-%m-%dT%H:%M:%S"))
+
         current += datetime.timedelta(minutes=duration_minutes)
 
     if available_slots:
         return f"AVAILABLE_SLOTS: {available_slots}"
-    return "No available slots found in the next few hours."
 
+    return "No available slots found in the next few hours."
 
 # ── Tool: book_appointment ────────────────────────────────────────────────────
 
