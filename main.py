@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sarvamai import AsyncSarvamAI
+from sarvamai import AsyncSarvamAI, AudioOutput
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -573,6 +573,7 @@ def split_into_sentences(text: str) -> List[str]:
             chunks.append(buffer)
     return chunks or [text]
 
+# ── Fallback: non-streaming TTS (used only for error/fallback messages) ────────
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=4),
@@ -580,6 +581,7 @@ def split_into_sentences(text: str) -> List[str]:
     before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed…")
 )
 async def tts_convert(text: str, speaker: str = "simran", lang: str = "gu-IN") -> str:
+    """Blocking HTTP TTS — only used for fallback/error messages."""
     res = await client_tts.text_to_speech.convert(
         text=text,
         target_language_code=lang,
@@ -587,6 +589,223 @@ async def tts_convert(text: str, speaker: str = "simran", lang: str = "gu-IN") -
         speaker=speaker
     )
     return res.audios[0]
+
+
+# ── Streaming TTS session — one per voice WebSocket connection ────────────────
+class StreamingTTSSession:
+    """
+    Streaming TTS via Bulbul v3 WebSocket.
+
+    Architecture:
+    - Opens a FRESH WS per response (clean lifecycle, no "iterator never exits" problem).
+    - Runs two concurrent tasks inside each WS:
+        sender:   sends each sentence + flush() one by one
+        receiver: async for message in tts_ws → forwards chunks to browser immediately
+    - The sender signals an asyncio.Event when all text is sent.
+    - The receiver runs until the WS context manager exits (which happens after
+      the sender finishes and a short idle window confirms no more chunks arrive).
+    - Each chunk is forwarded to the browser THE MOMENT it arrives — true streaming.
+    - Frontend receives many small audio_chunk messages and plays them via
+      MediaSource API (gapless streaming), so chunk count doesn't matter.
+    """
+
+    _SENTINEL = object()
+
+    def __init__(self, browser_ws: WebSocket):
+        self._browser_ws = browser_ws
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+
+    def start(self):
+        self._task = asyncio.create_task(self._run_forever())
+
+    async def speak(
+        self,
+        sentences: List[str],
+        speaker: str,
+        lang: str,
+        response_id: int,
+        done_event: asyncio.Event,
+    ):
+        """Enqueue a speak request. Returns immediately; done_event is set when audio is fully sent."""
+        await self._queue.put((sentences, speaker, lang, response_id, done_event))
+
+    async def close(self):
+        await self._queue.put(self._SENTINEL)
+        if self._task:
+            try:
+                await asyncio.wait_for(self._task, timeout=8.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._task.cancel()
+
+    async def _run_forever(self):
+        log("[TTS_STREAM]", "Worker started")
+        while True:
+            try:
+                item = await self._queue.get()
+                if item is self._SENTINEL:
+                    log("[TTS_STREAM]", "Sentinel — shutting down")
+                    return
+
+                sentences, speaker, lang, response_id, done_event = item
+                log("[TTS_STREAM]", f"resp_id={response_id} | {len(sentences)} sentence(s) | "
+                    f"speaker={speaker} lang={lang}")
+                try:
+                    await self._do_speak(sentences, speaker, lang, response_id)
+                except Exception as e:
+                    log("[TTS_STREAM]", f"resp_id={response_id} streaming failed ({e}) — HTTP fallback")
+                    await self._fallback_http(sentences, speaker, lang, response_id)
+                finally:
+                    done_event.set()
+
+            except asyncio.CancelledError:
+                log("[TTS_STREAM]", "Worker cancelled")
+                return
+            except Exception as e:
+                log("[TTS_STREAM]", f"Unexpected worker error: {e}")
+
+    async def _do_speak(
+        self,
+        sentences: List[str],
+        speaker: str,
+        lang: str,
+        response_id: int,
+    ):
+        """
+        TRUE streaming path.
+        - Sender task:   configure → per-sentence convert() + flush()
+        - Receiver task: async for message in tts_ws → forward chunk to browser immediately
+        - Drain logic:   after sender finishes, keep reading until no new chunk arrives
+          for IDLE_AFTER_LAST_CHUNK_S seconds (rolling reset on every chunk).
+          This is robust regardless of how long synthesis takes.
+        """
+        chunk_count = 0
+        send_done   = asyncio.Event()
+        last_chunk_event = asyncio.Event()   # pulsed each time a chunk arrives
+
+        async with client_tts.text_to_speech_streaming.connect(
+            model="bulbul:v3"
+        ) as tts_ws:
+            log("[TTS_STREAM]", f"resp_id={response_id} WS open")
+
+            # ── Sender ────────────────────────────────────────────────────────
+            async def sender():
+                try:
+                    await tts_ws.configure(target_language_code=lang, speaker=speaker)
+                    for sentence in sentences:
+                        log("[TTS_STREAM]", f"resp_id={response_id} → '{sentence[:60]}'")
+                        await tts_ws.convert(sentence)
+                        await tts_ws.flush()
+                    log("[TTS_STREAM]", f"resp_id={response_id} sender done")
+                except Exception as e:
+                    log("[TTS_STREAM]", f"resp_id={response_id} sender error: {e}")
+                finally:
+                    send_done.set()
+
+            # ── Receiver ──────────────────────────────────────────────────────
+            async def receiver():
+                nonlocal chunk_count
+                try:
+                    async for message in tts_ws:
+                        if not isinstance(message, AudioOutput):
+                            continue
+                        audio_b64 = message.data.audio
+                        chunk_count += 1
+                        log("[TTS_STREAM]", f"resp_id={response_id} chunk#{chunk_count} "
+                            f"({len(audio_b64)} b64 chars) → browser")
+                        try:
+                            await self._browser_ws.send_json({
+                                "type": "audio_chunk",
+                                "index": chunk_count - 1,
+                                "total": -1,
+                                "audio": audio_b64,
+                                "audio_format": "mp3",
+                                "is_last": False,
+                                "response_id": response_id,
+                            })
+                        except Exception:
+                            log("[TTS_STREAM]", f"resp_id={response_id} browser send failed")
+                            return
+                        # Signal the drain watcher that a chunk just arrived
+                        last_chunk_event.set()
+                        last_chunk_event.clear()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    log("[TTS_STREAM]", f"resp_id={response_id} receiver error: {e}")
+                    raise
+
+            sender_task   = asyncio.create_task(sender())
+            receiver_task = asyncio.create_task(receiver())
+
+            # ── Drain watcher ─────────────────────────────────────────────────
+            # Wait for sender to finish, then wait until no new chunk has arrived
+            # for IDLE_S seconds. This window resets on every chunk, so we never
+            # cut off mid-stream no matter how slow Bulbul is.
+            IDLE_S = 1.2   # seconds of silence after last chunk before we stop
+            await send_done.wait()
+            log("[TTS_STREAM]", f"resp_id={response_id} sender done — draining (idle={IDLE_S}s)")
+
+            while True:
+                try:
+                    # Wait for a new chunk to arrive within IDLE_S
+                    await asyncio.wait_for(last_chunk_event.wait(), timeout=IDLE_S)
+                    # A chunk arrived — reset and wait again
+                except asyncio.TimeoutError:
+                    # No chunk for IDLE_S seconds after the last one → stream is done
+                    log("[TTS_STREAM]", f"resp_id={response_id} idle timeout — stopping receiver")
+                    break
+
+            receiver_task.cancel()
+            try:
+                await receiver_task
+            except asyncio.CancelledError:
+                pass
+            sender_task.cancel()
+            try:
+                await sender_task
+            except asyncio.CancelledError:
+                pass
+
+        if chunk_count == 0:
+            raise RuntimeError("No audio chunks received from Bulbul")
+
+        log("[TTS_STREAM]", f"resp_id={response_id} ✓ {chunk_count} chunks streamed to browser")
+        try:
+            await self._browser_ws.send_json({
+                "type": "tts_done",
+                "response_id": response_id,
+                "total_chunks": chunk_count,
+            })
+        except Exception:
+            pass
+
+    async def _fallback_http(
+        self,
+        sentences: List[str],
+        speaker: str,
+        lang: str,
+        response_id: int,
+    ):
+        """HTTP fallback — used only if WS fails. Single call for full text."""
+        log("[TTS_STREAM]", f"resp_id={response_id} HTTP fallback")
+        try:
+            full_text = " ".join(sentences)
+            audio_b64 = await tts_convert(full_text, speaker, lang)
+            await self._browser_ws.send_json({
+                "type": "audio_chunk",
+                "index": 0, "total": 1,
+                "audio": audio_b64,
+                "audio_format": "wav",
+                "is_last": True,
+                "response_id": response_id,
+            })
+            await self._browser_ws.send_json({
+                "type": "tts_done",
+                "response_id": response_id,
+            })
+        except Exception as e:
+            log("[TTS_STREAM]", f"resp_id={response_id} HTTP fallback also failed: {e}")
 
 @retry(
     stop=stop_after_attempt(3),
@@ -626,7 +845,8 @@ async def extract_memory(user_text: str, memory: dict):
         print("[MEMORY] Extraction failed:", e)
         return {}
 
-async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
+async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
+                    tts_session: Optional["StreamingTTSSession"] = None):
     t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
     day   = t0.strftime("%A")
@@ -643,13 +863,18 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
         sentences = split_into_sentences(clarification)
         await websocket.send_json({"type": "ai_text", "text": clarification, "chunk_count": len(sentences)})
         await websocket.send_json({"type": "ai_speaking_start"})
-        for idx, sentence in enumerate(sentences):
-            audio_b64 = await tts_convert(sentence)
-            await websocket.send_json({
-                "type": "audio_chunk", "index": idx, "total": len(sentences),
-                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
-            })
-        await websocket.send_json({"type": "tts_done"})
+        if tts_session:
+            done_evt = asyncio.Event()
+            await tts_session.speak(sentences, "simran", "gu-IN", 0, done_evt)
+            await done_evt.wait()
+        else:
+            for idx, sentence in enumerate(sentences):
+                audio_b64 = await tts_convert(sentence)
+                await websocket.send_json({
+                    "type": "audio_chunk", "index": idx, "total": len(sentences),
+                    "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+                })
+            await websocket.send_json({"type": "tts_done"})
         return
 
     if session_id not in chat_sessions:
@@ -775,15 +1000,28 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket):
     await websocket.send_json({"type": "ai_text", "text": reply_text, "chunk_count": len(sentences)})
     await websocket.send_json({"type": "ai_speaking_start"})
 
-    for idx, sentence in enumerate(sentences):
-        log("[TTS]", f"Chunk {idx+1}/{len(sentences)} | speaker={tts_speaker} lang={tts_lang} | '{sentence[:60]}'")
-        audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
-        await websocket.send_json({
-            "type": "audio_chunk", "index": idx, "total": len(sentences),
-            "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
-        })
+    if tts_session:
+        # ── Streaming TTS path ────────────────────────────────────────────────
+        # We enqueue all sentences at once; the streaming session sends audio
+        # chunks to the browser as they arrive from Bulbul — no per-sentence wait.
+        done_evt = asyncio.Event()
+        import random
+        resp_id = random.randint(1, 999999)
+        log("[TTS_STREAM]", f"Enqueuing {len(sentences)} sentence(s) | resp_id={resp_id}")
+        await tts_session.speak(sentences, tts_speaker, tts_lang, resp_id, done_evt)
+        await done_evt.wait()
+        log("[TTS_STREAM]", f"resp_id={resp_id} finished")
+    else:
+        # ── Fallback: sequential HTTP TTS ─────────────────────────────────────
+        for idx, sentence in enumerate(sentences):
+            log("[TTS]", f"Chunk {idx+1}/{len(sentences)} | speaker={tts_speaker} lang={tts_lang} | '{sentence[:60]}'")
+            audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
+            await websocket.send_json({
+                "type": "audio_chunk", "index": idx, "total": len(sentences),
+                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+            })
+        await websocket.send_json({"type": "tts_done"})
 
-    await websocket.send_json({"type": "tts_done"})
     log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
 
 
@@ -823,6 +1061,11 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     ai_speaking  = asyncio.Event()
     commit_queue: asyncio.Queue = asyncio.Queue()
     audio_buf:    asyncio.Queue = asyncio.Queue(maxsize=300)
+
+    # ── Streaming TTS session (separate Bulbul v3 WebSocket) ─────────────────
+    tts_session = StreamingTTSSession(websocket)
+    tts_session.start()
+    log("[WS]", "StreamingTTSSession started")
 
     _recv = _drop_ai = _sent = 0
 
@@ -883,14 +1126,14 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                                         })
                                                         await websocket.send_json({"type": "ai_speaking_start"})
                                                         
-                                                        for idx, sentence in enumerate(sentences):
-                                                            audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
-                                                            await websocket.send_json({
-                                                                "type": "audio_chunk", "index": idx, "total": len(sentences),
-                                                                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
-                                                            })
-                                                            
-                                                        await websocket.send_json({"type": "tts_done"})
+                                                        done_evt = asyncio.Event()
+                                                        import random as _rand
+                                                        resp_id = _rand.randint(1, 999999)
+                                                        await tts_session.speak(
+                                                            sentences, tts_speaker, tts_lang,
+                                                            resp_id, done_evt
+                                                        )
+                                                        await done_evt.wait()
                                                         log("[GREETING]", "Greeting playback finished")
                                                 except Exception as e:
                                                     log("[GREETING]", f"Error playing greeting: {e}")
@@ -1092,7 +1335,6 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         except Exception as e:
             log("[STT_RECV]", f"Receiver ended: {e}")
 
-    # ── Task 3: Brain consumer ────────────────────────────────────────────────
     async def brain_consumer():
         log("[BRAIN_CONSUMER]", "Started — waiting for commits")
         while True:
@@ -1106,7 +1348,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                     log("[BRAIN_CONSUMER]", "Lock ACQUIRED")
                     await websocket.send_json({"type": "processing_start"})
                     try:
-                        await run_brain(session_id, sentence, websocket)
+                        await run_brain(session_id, sentence, websocket, tts_session)
                     except Exception as e:
                         log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
                         fallback_text = _get_fallback_message(e)
@@ -1116,12 +1358,14 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                 "type": "ai_text", "text": fallback_text, "chunk_count": 1
                             })
                             await websocket.send_json({"type": "ai_speaking_start"})
-                            audio_b64 = await tts_convert(fallback_text)
-                            await websocket.send_json({
-                                "type": "audio_chunk", "index": 0, "total": 1,
-                                "text": fallback_text, "audio": audio_b64, "is_last": True
-                            })
-                            await websocket.send_json({"type": "tts_done"})
+                            # Use streaming TTS for fallback too
+                            done_evt = asyncio.Event()
+                            import random as _rand
+                            resp_id = _rand.randint(1, 999999)
+                            await tts_session.speak(
+                                [fallback_text], "simran", "gu-IN", resp_id, done_evt
+                            )
+                            await done_evt.wait()
                         except Exception as tts_err:
                             log("[BRAIN_CONSUMER]", f"Fallback TTS also failed: {tts_err}")
                         continue
@@ -1141,7 +1385,11 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         )
     except Exception as e:
         log("[WS]", f"Handler CRASHED: {e}\n{traceback.format_exc()}")
+    finally:
+        log("[WS]", "Closing StreamingTTSSession")
+        await tts_session.close()
     log("[WS]", "All tasks exited")
+
 
 
 def compute_rms(raw_bytes: bytes) -> float:

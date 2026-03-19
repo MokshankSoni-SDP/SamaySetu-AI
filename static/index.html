@@ -1054,38 +1054,224 @@
         }
 
         // ── Audio helpers ─────────────────────────────────────────────────────────────
-        function b64ToBlob(b64, mime) {
-            const bytes = atob(b64), arr = new Uint8Array(bytes.length);
-            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-            return new Blob([arr], { type: mime });
+        //
+        // TWO playback modes depending on audio_format:
+        //
+        // 1. STREAMING MODE (audio_format='mp3'):
+        //    Uses MediaSource API. Each chunk is appended to a SourceBuffer immediately.
+        //    Playback starts on the FIRST chunk (~300ms after LLM).
+        //    tts_done → endOfStream() → audio plays out → onended → onAllChunksDone.
+        //
+        // 2. FALLBACK MODE (audio_format='wav'):
+        //    Classic blob-URL Audio objects queued sequentially.
+        //
+        // KEY INVARIANT: onAllChunksDone fires EXACTLY ONCE per response.
+        //   - responseFinished flag guards against double-fire.
+        //   - Mic is NOT unmuted until audio has actually finished playing.
+        //
+
+        let mediaSource = null, sourceBuffer = null, msAudio = null;
+        let msChunkQueue = [];
+        let msAppending = false;
+        let msTtsDone = false;
+        let ttsDoneReceived = false;
+        let responseFinished = false;   // ← guard: prevents double onAllChunksDone
+
+        function b64ToBytes(b64) {
+            const bin = atob(b64);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            return arr.buffer;
         }
-        function enqueueChunk(b64, text, index) {
-            audioQueue.push({ audio: b64, text, index });
+        function b64ToBlob(b64, mime) {
+            return new Blob([b64ToBytes(b64)], { type: mime });
+        }
+
+        // ── MediaSource streaming player ──────────────────────────────────────
+        function msInit(responseId) {
+            msDestroy();
+            msTtsDone = false;
+            msChunkQueue = [];
+            msAppending = false;
+            responseFinished = false;
+
+            if (!window.MediaSource) return false;
+
+            mediaSource = new MediaSource();
+            msAudio = new Audio();
+            msAudio.src = URL.createObjectURL(mediaSource);
+
+            mediaSource.addEventListener('sourceopen', () => {
+                try {
+                    sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                    sourceBuffer.mode = 'sequence';
+                    sourceBuffer.addEventListener('updateend', () => {
+                        msAppending = false;
+                        msDrainQueue(responseId);
+                    });
+                    msDrainQueue(responseId);
+                } catch (e) {
+                    console.error('[MS] addSourceBuffer failed:', e);
+                    msDestroy();
+                }
+            });
+
+            msAudio.onplay = () => {
+                // Confirm AI is speaking — mic should already be muted from ai_speaking_start
+                if (!aiSpeaking) { aiSpeaking = true; cancelSilenceTimer(); setMicMuteUI(true); }
+            };
+            // onended fires when the audio element reaches end of buffered data
+            msAudio.onended = () => {
+                console.debug('[MS] audio ended | resp=' + responseId);
+                msDestroy();
+                onAllChunksDone(responseId);   // guarded inside — fires once
+            };
+            msAudio.onerror = (e) => {
+                console.error('[MS] audio error', e);
+                msDestroy();
+                onAllChunksDone(responseId);
+            };
+
+            msAudio.play().catch(err => console.warn('[MS] autoplay blocked:', err));
+            return true;
+        }
+
+        function msAppendChunk(b64, responseId) {
+            msChunkQueue.push(b64ToBytes(b64));
+            msDrainQueue(responseId);
+        }
+
+        function msDrainQueue(responseId) {
+            if (msAppending || !sourceBuffer || sourceBuffer.updating) return;
+            if (msChunkQueue.length > 0) {
+                msAppending = true;
+                sourceBuffer.appendBuffer(msChunkQueue.shift());
+                if (msAudio && msAudio.paused && msAudio.readyState >= 2) {
+                    msAudio.play().catch(() => { });
+                }
+            } else if (msTtsDone) {
+                // Queue empty + server signalled done → close the stream
+                // audio element will play out remaining buffered data then fire onended
+                msEndStream(responseId);
+            }
+        }
+
+        function msSignalDone(responseId) {
+            msTtsDone = true;
+            if (msChunkQueue.length === 0 && !msAppending && sourceBuffer) {
+                msEndStream(responseId);
+            }
+            // else updateend → msDrainQueue → msEndStream once queue drains
+        }
+
+        function msEndStream(responseId) {
+            if (!mediaSource || mediaSource.readyState !== 'open') return;
+            try {
+                mediaSource.endOfStream();
+                console.debug('[MS] endOfStream() | resp=' + responseId);
+            } catch (e) {
+                console.warn('[MS] endOfStream error:', e);
+            }
+            // NOTE: do NOT call onAllChunksDone here — wait for msAudio.onended
+            // so the mic only unmutes AFTER the audio finishes playing.
+        }
+
+        function msDestroy() {
+            if (msAudio) {
+                msAudio.onended = null;   // prevent stale callbacks
+                msAudio.onerror = null;
+                msAudio.pause();
+                if (msAudio.src) URL.revokeObjectURL(msAudio.src);
+                msAudio.src = '';
+                msAudio = null;
+            }
+            sourceBuffer = null;
+            mediaSource = null;
+            msChunkQueue = [];
+            msAppending = false;
+            msTtsDone = false;
+        }
+
+        // ── Fallback: blob-URL Audio queue (for WAV) ──────────────────────────
+        function enqueueChunk(b64, index, audioFormat) {
+            if (audioFormat === 'mp3') {
+                msAppendChunk(b64, currentResponseId);
+                return;
+            }
+            audioQueue.push({ audio: b64, mime: 'audio/wav' });
             if (!queuePlaying) playNextChunk();
         }
+
         function playNextChunk() {
-            if (audioQueue.length === 0) { queuePlaying = false; onAllChunksDone(currentResponseId); return; }
+            if (audioQueue.length === 0) {
+                queuePlaying = false;
+                if (ttsDoneReceived) { ttsDoneReceived = false; onAllChunksDone(currentResponseId); }
+                return;
+            }
             queuePlaying = true;
-            const { audio, text, index } = audioQueue.shift();
-            const blob = b64ToBlob(audio, 'audio/wav');
+            const { audio, mime } = audioQueue.shift();
+            const blob = b64ToBlob(audio, mime);
             const url = URL.createObjectURL(blob);
             currentAudio = new Audio(url);
             currentAudio.onplay = () => { if (!aiSpeaking) { aiSpeaking = true; cancelSilenceTimer(); setMicMuteUI(true); } };
             currentAudio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); };
             currentAudio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); };
-            currentAudio.play().catch(() => playNextChunk());
+            currentAudio.play().catch(() => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); });
         }
+
+        function onTtsDone(responseId) {
+            console.debug('[TTS] tts_done | resp=' + responseId);
+            if (msAudio && mediaSource) {
+                // Streaming mode: close stream, let audio play out, onended fires onAllChunksDone
+                msSignalDone(responseId);
+                return;
+            }
+            // WAV fallback: if queue already drained, finalize now; else wait
+            if (!queuePlaying && audioQueue.length === 0) {
+                onAllChunksDone(currentResponseId);
+            } else {
+                ttsDoneReceived = true;
+            }
+        }
+
         function onAllChunksDone(responseId) {
-            if (responseId !== currentResponseId) return;
-            aiSpeaking = false; lastPartialTranscript = ''; cancelSilenceTimer(); setMicMuteUI(false);
-            if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
+            // ── GUARD: fire exactly once per response ──────────────────────────
+            if (responseFinished) {
+                console.debug('[AUDIO] onAllChunksDone ignored (already fired) | resp=' + responseId);
+                return;
+            }
+            if (responseId !== currentResponseId) {
+                console.debug('[AUDIO] onAllChunksDone ignored (stale resp) | resp=' + responseId);
+                return;
+            }
+            responseFinished = true;
+            // ──────────────────────────────────────────────────────────────────
+            console.debug('[AUDIO] onAllChunksDone FIRING | resp=' + responseId);
+            aiSpeaking = false;
+            lastPartialTranscript = '';
+            cancelSilenceTimer();
+            setMicMuteUI(false);
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
             setStatus('સાંભળી રહ્યો છું...', true);
-            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...'; transcriptBox.classList.add('empty');
+            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
+            transcriptBox.classList.add('empty');
         }
+
         function clearAudioQueue() {
-            if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
-            audioQueue = []; queuePlaying = false;
-            if (aiSpeaking) { aiSpeaking = false; if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ai_speaking_end' })); }
+            msDestroy();
+            if (currentAudio) {
+                currentAudio.pause();
+                if (currentAudio.src) URL.revokeObjectURL(currentAudio.src);
+                currentAudio = null;
+            }
+            audioQueue = []; queuePlaying = false; ttsDoneReceived = false;
+            responseFinished = false;
+            if (aiSpeaking) {
+                aiSpeaking = false;
+                if (socket && socket.readyState === WebSocket.OPEN)
+                    socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
+            }
         }
 
         // ── Silence commit ────────────────────────────────────────────────────────────
@@ -1260,11 +1446,20 @@
                 if (data.type === 'processing_start') setStatus('Processing...', true);
                 if (data.type === 'ai_speaking_start') {
                     currentResponseId++;
-                    if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
-                    audioQueue = []; queuePlaying = false; aiSpeaking = true;
+                    // Tear down any previous audio state cleanly
+                    clearAudioQueue();   // resets responseFinished, msDestroy, etc.
+                    aiSpeaking = true;
                     lastPartialTranscript = ''; cancelSilenceTimer(); setMicMuteUI(true);
+                    // Pre-init MediaSource so it's ready when first chunk arrives
+                    msInit(currentResponseId);
                 }
-                if (data.type === 'audio_chunk') enqueueChunk(data.audio, data.text, data.index);
+                // audio_chunk: mp3 → MediaSource streaming, wav → legacy blob queue
+                if (data.type === 'audio_chunk') enqueueChunk(data.audio, data.index, data.audio_format || 'wav');
+                // tts_done: no more chunks — signal end of stream
+                if (data.type === 'tts_done') {
+                    console.debug('[TTS] tts_done | resp=' + (data.response_id || '?') + ' chunks=' + (data.total_chunks || '?'));
+                    onTtsDone(data.response_id || currentResponseId);
+                }
                 if (data.type === 'stt_ready' && data.reconnect_num > 0) showToast('STT reconnected ✓', 'success');
                 if (data.type === 'stt_failed') { setStatus('STT failed — refresh page', false); showToast('Voice recognition failed.', 'error'); }
                 if (data.type === 'tool_call' && data.status === 'ok') {
