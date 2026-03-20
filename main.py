@@ -711,8 +711,8 @@ class StreamingTTSSession:
                             continue
                         audio_b64 = message.data.audio
                         chunk_count += 1
-                        log("[TTS_STREAM]", f"resp_id={response_id} chunk#{chunk_count} "
-                            f"({len(audio_b64)} b64 chars) → browser")
+                        # log("[TTS_STREAM]", f"resp_id={response_id} chunk#{chunk_count} "
+                        #     f"({len(audio_b64)} b64 chars) → browser")
                         try:
                             await self._browser_ws.send_json({
                                 "type": "audio_chunk",
@@ -884,16 +884,16 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
                                      "bot_config": None,
                                      "memory":{
                                         "intent": None,
-                                            "pending_action": None,
-                                            "appointment": {
-                                                "date": None,
-                                                "time": None,
-                                                "duration": None
-                                            },
-                                            "reschedule": {
-                                                "old_time": None,
-                                                "new_time": None
-                                            }
+                                        "pending_action": "waiting_for_confirmation",
+                                        "appointment": {
+                                            "date": None,
+                                            "time": None,
+                                            "duration": None
+                                        },
+                                        "reschedule": {
+                                            "old_time": None,
+                                            "new_time": None
+                                        }
                                      }}
 
     session_data = chat_sessions[session_id]
@@ -966,7 +966,24 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
                 obs    = await run_tool_async(tname, targs)
                 if "SUCCESS" in str(obs):
                     print("$$$state memory deleted after success$$$")
-                    session_data["memory"]["pending_action"] = None
+                    session_data["memory"] = {
+                            "intent": "none",
+                            "pending_action": "waiting_for_confirmation",
+                            "appointment": {
+                                "date": None,
+                                "time": None,
+                                "duration": None
+                            },
+                            "reschedule": {
+                                "old_time": None,
+                                "new_time": None
+                            },
+                            "date_context": {
+                                "resolved_date": None,
+                                "source": "none"
+                            }
+                        }
+
                 status = "ok"
                 log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s | result='{str(obs)[:100]}'")
             except Exception as e:
