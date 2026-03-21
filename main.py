@@ -1,5 +1,6 @@
 import os
 import re
+import re as _re
 import json
 import base64
 import asyncio
@@ -206,18 +207,37 @@ MAX_HISTORY = 5
 MAX_TOOL_ITERATIONS = 2
 
 # Gujarati number words → digits
+# Includes Gujarati Unicode + phonetic romanized STT variants (Fix 3)
 GUJ_NUMBERS = {
+    # Authentic Gujarati script
     "એક": 1, "બે": 2, "ત્રણ": 3, "ચાર": 4,
     "પાંચ": 5, "છ": 6, "સાત": 7, "આઠ": 8,
-    "નવ": 9, "દસ": 10, "અગિયાર": 11, "બાર": 12
+    "નવ": 9, "દસ": 10, "અગિયાર": 11, "બાર": 12,
+    # Phonetic romanized variants (common Sarvam STT outputs)
+    "ek": 1, "eak": 1, "aek": 1, "1": 1,
+    "be": 2, "bay": 2, "2": 2,
+    "tran": 3, "teen": 3, "tin": 3, "3": 3,
+    "char": 4, "chaar": 4, "4": 4,
+    "panch": 5, "paanch": 5, "5": 5,
+    "chha": 6, "chhah": 6, "cha": 6, "6": 6,
+    "saat": 7, "sat": 7, "7": 7,
+    "aath": 8, "ath": 8, "8": 8,
+    "nav": 9, "9": 9,
+    "das": 10, "10": 10,
+    "agiyar": 11, "eleven": 11, "11": 11,
+    "bar": 12, "bara": 12, "baara": 12, "twelve": 12, "12": 12,
 }
 SPECIAL_PHRASES = {"દોઢ": (1, 30), "અઢી": (2, 30)}
 COMMON_STT_VARIANTS = {
     "સ્વા": "સવા", "સવા": "સવા",
     "સાડા": "સાડા", "પોના": "પોણા", "પોણા": "પોણા"
 }
-
-import re as _re
+# Phonetic romanized prefix variants → standard Gujarati (Fix 3)
+PHONETIC_PREFIX_MAP = {
+    "sava ": "સવા ", "saava ": "સવા ",
+    "sada ": "સાડા ", "saada ": "સાડા ", "sade ": "સાડા ",
+    "pona ": "પોણા ", "pauna ": "પોણા ", "paune ": "પોણા ",
+}
 
 def is_noisy_transcript(text: str) -> bool:
     stripped = _re.sub(r'[\s.,!?।\u0964]+', ' ', text).strip()
@@ -239,9 +259,17 @@ def normalize_variants(text):
         text = text.replace(wrong, correct)
     return text
 
+def normalize_phonetic_numbers(text: str) -> str:
+    """Pre-pass: map phonetic romanized time-prefixes to Gujarati before regex (Fix 3)."""
+    t = text.lower()
+    for roman, gujarati in PHONETIC_PREFIX_MAP.items():
+        t = t.replace(roman, gujarati)
+    return t
+
 def normalize_gujarati_time(text: str) -> str:
-    original_text = text
     text = text.lower().strip()
+    # Fix 3 pre-pass — convert phonetic romanized prefixes to Gujarati
+    text = normalize_phonetic_numbers(text)
     for phrase, (h, m) in SPECIAL_PHRASES.items():
         if phrase in text:
             text = text.replace(phrase, f"{h}:{m:02d}")
@@ -250,7 +278,8 @@ def normalize_gujarati_time(text: str) -> str:
         match = re.search(rf"{prefix}\s*(\w+)", text)
         if match:
             hour_word = match.group(1)
-            hour = GUJ_NUMBERS.get(hour_word)
+            # Fix 3: look up both Gujarati & romanized variants
+            hour = GUJ_NUMBERS.get(hour_word) or GUJ_NUMBERS.get(hour_word.lower())
             if hour:
                 h = hour + offset
                 text = text.replace(match.group(0), f"{h}:{minutes}")
@@ -554,6 +583,44 @@ async def run_tool_async(tool_name: str, args: dict):
     return await asyncio.to_thread(func, **args)
 
 MIN_CHUNK_CHARS = 20
+
+# ── Fix 2: TTS output filter — block tool calls / JSON from being spoken ─────
+_TOOL_BLOCK_RE = re.compile(
+    r'<function=[^>]*>.*?(?:</function>|$)'  # <function=name>...</function>
+    r'|\{[^{}]{0,800}"(?:tool_name|function_name|arguments|tool_use_id)"[^{}]{0,800}\}',
+    re.DOTALL,
+)
+
+def is_tool_output(text: str) -> bool:
+    """Return True if the whole reply is a raw tool/JSON artifact (Fix 2)."""
+    t = text.strip()
+    return (
+        t.startswith("{") or
+        t.startswith("[{") or
+        "<function=" in t or
+        '"tool_name"' in t or
+        '"function_name"' in t
+    )
+
+def clean_for_tts(text: str) -> str:
+    """Strip tool call fragments from mixed LLM output before TTS (Fix 2)."""
+    text = _TOOL_BLOCK_RE.sub("", text)
+    # Remove any remaining bare JSON-looking blocks (conservative: must have quotes)
+    text = re.sub(r'\{[^}]{0,500}\}', "", text)
+    return text.strip()
+
+# ── Fix 4: AI-echo similarity filter ─────────────────────────────────────────
+def is_echo_of_ai(user_text: str, ai_text: str, threshold: float = 0.75) -> bool:
+    """Jaccard token overlap — catches mic capturing AI's own speech (Fix 4)."""
+    if not ai_text or not user_text:
+        return False
+    u_tokens = set(user_text.lower().split())
+    a_tokens = set(ai_text.lower().split())
+    if not u_tokens or len(u_tokens) < 3:  # too short to judge
+        return False
+    intersection = u_tokens & a_tokens
+    union = u_tokens | a_tokens
+    return len(intersection) / len(union) >= threshold
 
 def split_into_sentences(text: str) -> List[str]:
     raw = re.split(r'(?<=[.!?।\u0964])\s+', text.strip())
@@ -964,7 +1031,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
             t_tool = datetime.now()
             try:
                 obs    = await run_tool_async(tname, targs)
-                if "SUCCESS" in str(obs):
+                if "success" in str(obs).lower():
                     print("$$$state memory deleted after success$$$")
                     session_data["memory"] = {
                             "intent": "none",
@@ -1011,8 +1078,24 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
     if len(history) > MAX_HISTORY * 2 + 2:
         history[:] = [history[0]] + history[-(MAX_HISTORY * 2):]
 
-    sentences = split_into_sentences(reply_text)
-    log("[BRAIN]", f"Reply: '{reply_text[:80]}' | {len(sentences)} sentences")
+    # Fix 4: store last AI response for echo detection
+    session_data["last_ai_text"] = reply_text
+
+    # Fix 2: filter tool/JSON output — do NOT speak raw tool artifacts
+    if is_tool_output(reply_text):
+        log("[TTS_FILTER]", f"Blocked tool output from TTS: '{reply_text[:80]}'")
+        log("[BRAIN]", f"DONE (tool-only, no TTS) in {(datetime.now()-t0).total_seconds():.2f}s")
+        return
+
+    # Fix 2: strip any stray tool fragments from mixed text before TTS
+    tts_text = clean_for_tts(reply_text)
+    if not tts_text:
+        log("[TTS_FILTER]", "Reply cleaned to empty — skipping TTS")
+        log("[BRAIN]", f"DONE (empty after clean) in {(datetime.now()-t0).total_seconds():.2f}s")
+        return
+
+    sentences = split_into_sentences(tts_text)
+    log("[BRAIN]", f"Reply: '{tts_text[:80]}' | {len(sentences)} sentences")
 
     await websocket.send_json({"type": "ai_text", "text": reply_text, "chunk_count": len(sentences)})
     await websocket.send_json({"type": "ai_speaking_start"})
@@ -1075,7 +1158,16 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     }
 
     brain_lock   = asyncio.Lock()
-    ai_speaking  = asyncio.Event()
+    # Fix 1: Replace asyncio.Event with a float epoch-seconds timestamp.
+    # Mic is blocked while time.monotonic() < ai_speaking_until.
+    # This lets us add a server-side post-TTS buffer without any async sleep.
+    import time as _time
+    ai_speaking_until: list = [0.0]   # mutable float in a list so nested funcs can write it
+    AI_POST_TTS_BUFFER = 0.90          # seconds of mic-silence after browser sends ai_speaking_end
+
+    def _ai_is_speaking() -> bool:
+        return _time.monotonic() < ai_speaking_until[0]
+
     commit_queue: asyncio.Queue = asyncio.Queue()
     audio_buf:    asyncio.Queue = asyncio.Queue(maxsize=300)
 
@@ -1170,26 +1262,35 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                 log("[WS]", f"set_user phone={phone}")
 
                         elif ctrl_type == "ai_speaking_start":
-                            ai_speaking.set()
+                            # Fix 1: set timestamp far ahead (30s max guard)
+                            ai_speaking_until[0] = _time.monotonic() + 30.0
                             log("[CTRL]", "ai_speaking_start → mic MUTED")
 
                         elif ctrl_type == "ai_speaking_end":
-                            ai_speaking.clear()
-                            log("[CTRL]", f"ai_speaking_end → mic UN-MUTED | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
+                            # Fix 1: add post-TTS buffer — mic stays blocked for AI_POST_TTS_BUFFER
+                            # seconds after browser fires onended, preventing feedback from audio tail
+                            ai_speaking_until[0] = _time.monotonic() + AI_POST_TTS_BUFFER
+                            log("[CTRL]", f"ai_speaking_end → mic blocked until +{AI_POST_TTS_BUFFER}s | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
 
                         elif ctrl_type == "commit_transcript":
                             text = ctrl.get("text", "").strip()
-                            log("[COMMIT]", f"Received text='{text}' | ai_speaking={ai_speaking.is_set()} | queue_size={commit_queue.qsize()}")
+                            speaking_now = _ai_is_speaking()
+                            log("[COMMIT]", f"Received text='{text}' | ai_speaking={speaking_now} | queue_size={commit_queue.qsize()}")
                             if not text:
                                 log("[COMMIT]", "IGNORED — empty text")
-                            elif ai_speaking.is_set():
-                                log("[COMMIT]", f"DROPPED (AI speaking): '{text}'")
+                            elif speaking_now:
+                                log("[COMMIT]", f"DROPPED (AI speaking/buffer): '{text}'")
                             elif is_noisy_transcript(text):
                                 log("[COMMIT]", f"DROPPED (noisy): '{text}' → sending __UNCLEAR__")
                                 await commit_queue.put("__UNCLEAR__")
                             else:
-                                log("[COMMIT]", f"QUEUED: '{text}'")
-                                await commit_queue.put(text)
+                                # Fix 4: echo detection — drop if too similar to last AI response
+                                last_ai = chat_sessions.get(session_id, {}).get("last_ai_text", "")
+                                if is_echo_of_ai(text, last_ai):
+                                    log("[COMMIT]", f"DROPPED (echo of AI): '{text}'")
+                                else:
+                                    log("[COMMIT]", f"QUEUED: '{text}'")
+                                    await commit_queue.put(text)
                         else:
                             log("[CTRL]", f"Unknown ctrl type='{ctrl_type}'")
                     except Exception as e:
@@ -1200,7 +1301,8 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                 if "bytes" in msg:
                     _recv += 1
                     raw = msg["bytes"]
-                    if ai_speaking.is_set():
+                    # Fix 1: gate on timestamp instead of asyncio.Event
+                    if _ai_is_speaking():
                         _drop_ai += 1
                         continue
                     try:
@@ -1243,7 +1345,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                         pass
 
                     recv_task = asyncio.create_task(
-                        _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking)
+                        _sarvam_receiver(sarvam_ws, commit_queue, websocket)
                     )
 
                     try:
@@ -1257,7 +1359,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             except asyncio.QueueEmpty:
                                 now = asyncio.get_event_loop().time()
                                 idle_s = now - last_real_pkt_time
-                                if idle_s >= KEEPALIVE_INTERVAL and not ai_speaking.is_set():
+                                if idle_s >= KEEPALIVE_INTERVAL and not _ai_is_speaking():
                                     log("[STT_SEND]", f"Keep-alive after {idle_s:.0f}s idle")
                                     await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
                                     last_real_pkt_time = now
@@ -1307,7 +1409,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                     pass
 
     # ── Task 2b: Sarvam transcript receiver (one per Sarvam connection) ───────
-    async def _sarvam_receiver(sarvam_ws, commit_queue, websocket, ai_speaking):
+    async def _sarvam_receiver(sarvam_ws, commit_queue, websocket):
         log("[STT_RECV]", "Receiver started")
         try:
             p_count = f_count = 0
@@ -1319,19 +1421,26 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                 if not transcript:
                     continue
 
-                speaking_tag = "AI_SPEAKING" if ai_speaking.is_set() else "user_turn"
+                speaking_now = _ai_is_speaking()
+                speaking_tag = "AI_SPEAKING" if speaking_now else "user_turn"
                 log("[DIAG:STT]", f"{'FINAL' if is_final else 'partial'} [{speaking_tag}]: '{transcript}' | noisy={is_noisy_transcript(transcript)}")
 
                 if is_final:
                     f_count += 1
                     log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
-                    if ai_speaking.is_set():
-                        log("[STT_RECV]", f"FINAL DROPPED (AI speaking): '{transcript}'")
+                    if speaking_now:
+                        # Fix 1: blocked by timestamp guard (includes post-TTS buffer)
+                        log("[STT_RECV]", f"FINAL DROPPED (AI speaking/buffer): '{transcript}'")
                     elif is_noisy_transcript(transcript):
                         log("[STT_RECV]", f"FINAL DROPPED (noisy): '{transcript}'")
                         await commit_queue.put("__UNCLEAR__")
                     else:
-                        await commit_queue.put(transcript)
+                        # Fix 4: echo detection — secondary guard against mic capturing AI voice tail
+                        last_ai = chat_sessions.get(session_id, {}).get("last_ai_text", "")
+                        if is_echo_of_ai(transcript, last_ai):
+                            log("[STT_RECV]", f"FINAL DROPPED (echo of AI): '{transcript}'")
+                        else:
+                            await commit_queue.put(transcript)
                 else:
                     p_count += 1
                     if p_count % 5 == 1:
