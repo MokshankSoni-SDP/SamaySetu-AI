@@ -1,596 +1,2719 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SamaySetu — Admin Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-<style>
-:root{--bg:#0a0c10;--surface:#10141c;--panel:#151a26;--border:#1e2538;
-  --accent:#f5a623;--accent2:#e05c2a;--text:#e8dcc8;--muted:#6b7280;
-  --success:#22c55e;--danger:#ef4444;--info:#60a5fa;--warn:#f59e0b;
-  --glow:rgba(245,166,35,.15);--radius:12px;
-  --font-display:'Cinzel',serif;--font-body:'Inter',sans-serif;--font-mono:'JetBrains Mono',monospace;}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;display:flex;flex-direction:column;}
-a{color:inherit;text-decoration:none;}
-input,select,textarea{font-family:var(--font-body);}
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SamaySetu — Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --surface: #10141c;
+      --panel: #151a26;
+      --border: #1e2538;
+      --accent: #f5a623;
+      --accent2: #e05c2a;
+      --text: #e8dcc8;
+      --muted: #6b7280;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --info: #60a5fa;
+      --warn: #f59e0b;
+      --glow: rgba(245, 166, 35, .15);
+      --radius: 12px;
+      --font-display: 'Cinzel', serif;
+      --font-body: 'Inter', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
 
-/* ── Layout ── */
-.layout{display:flex;min-height:100vh;}
-.sidebar-nav{width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:24px 0;flex-shrink:0;}
-.sidebar-nav .brand{padding:0 20px 24px;border-bottom:1px solid var(--border);margin-bottom:16px;}
-.brand-mark{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:grid;place-items:center;font-family:var(--font-display);font-size:14px;font-weight:700;color:#0a0c10;box-shadow:0 0 16px var(--glow);margin-bottom:8px;}
-.brand-name{font-family:var(--font-display);font-size:14px;color:var(--accent);}
-.brand-sub{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:2px;}
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:13px;color:var(--muted);cursor:pointer;transition:all .2s;border-left:3px solid transparent;}
-.nav-item:hover{background:rgba(255,255,255,.03);color:var(--text);}
-.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:rgba(245,166,35,.06);}
-.nav-icon{font-size:16px;width:20px;text-align:center;}
-.nav-section{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);padding:16px 20px 6px;margin-top:4px;}
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
 
-.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-.top-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
-.top-bar-title{font-size:16px;font-weight:600;}
-.top-bar-right{display:flex;align-items:center;gap:12px;}
-.admin-badge{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;display:flex;align-items:center;gap:8px;}
-.admin-email{color:var(--accent);font-family:var(--font-mono);font-size:11px;}
-.btn{padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;border:none;font-family:var(--font-body);font-weight:500;transition:all .2s;}
-.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0c10;}
-.btn-primary:hover{opacity:.88;}
-.btn-ghost{background:none;border:1px solid var(--border);color:var(--text);}
-.btn-ghost:hover{border-color:var(--accent);color:var(--accent);}
-.btn-danger{background:none;border:1px solid var(--border);color:var(--muted);}
-.btn-danger:hover{border-color:var(--danger);color:var(--danger);}
-.btn-sm{padding:5px 12px;font-size:12px;}
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
 
-.content-area{flex:1;padding:28px;overflow-y:auto;}
+    input,
+    select,
+    textarea {
+      font-family: var(--font-body);
+    }
 
-/* ── Tabs ── */
-.tab-panel{display:none;}
-.tab-panel.active{display:block;}
+    /* Layout */
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
 
-/* ── Stats row ── */
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;}
-.stat-card .stat-label{font-size:11px;color:var(--muted);letter-spacing:.05em;margin-bottom:8px;}
-.stat-card .stat-value{font-size:28px;font-weight:600;color:var(--text);}
-.stat-card .stat-sub{font-size:11px;color:var(--muted);margin-top:4px;}
-.stat-card.accent .stat-value{color:var(--accent);}
-.stat-card.success .stat-value{color:var(--success);}
-.stat-card.danger .stat-value{color:var(--danger);}
+    .sidebar-nav {
+      width: 220px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0;
+      flex-shrink: 0;
+    }
 
-/* ── Section cards ── */
-.section-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;overflow:hidden;}
-.section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
-.section-card-header h3{font-size:14px;font-weight:600;}
-.section-card-body{padding:20px;}
+    .sidebar-nav .brand {
+      padding: 0 20px 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
 
-/* ── Appointment table ── */
-.appt-table{width:100%;border-collapse:collapse;}
-.appt-table th{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);}
-.appt-table td{padding:12px 14px;font-size:13px;border-bottom:1px solid rgba(30,37,56,.5);}
-.appt-table tr:last-child td{border-bottom:none;}
-.appt-table tr:hover td{background:rgba(255,255,255,.015);}
-.tag{display:inline-flex;align-items:center;font-size:10px;padding:3px 9px;border-radius:20px;letter-spacing:.04em;font-weight:500;}
-.tag.booked{background:rgba(34,197,94,.12);color:var(--success);}
-.tag.cancelled{background:rgba(239,68,68,.12);color:var(--danger);}
-.tag.rescheduled{background:rgba(96,165,250,.12);color:var(--info);}
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      color: #0a0c10;
+      box-shadow: 0 0 16px var(--glow);
+      margin-bottom: 8px;
+    }
 
-/* ── Forms ── */
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-.form-grid.single{grid-template-columns:1fr;}
-.form-field{display:flex;flex-direction:column;gap:6px;}
-.form-field label{font-size:12px;color:var(--muted);letter-spacing:.04em;}
-.form-field input,.form-field select,.form-field textarea{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:13px;outline:none;transition:border-color .2s;appearance:none;}
-.form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:var(--accent);}
-.form-field select option{background:var(--bg);}
-.form-field textarea{resize:vertical;min-height:80px;line-height:1.5;}
-.form-actions{display:flex;gap:10px;margin-top:20px;}
-.form-section-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
-.form-section-title:first-child{margin-top:0;}
+    .brand-name {
+      font-family: var(--font-display);
+      font-size: 14px;
+      color: var(--accent);
+    }
 
-/* ── Toggle ── */
-.toggle-row{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text);padding:8px 0;}
-.toggle{position:relative;width:40px;height:22px;}
-.toggle input{opacity:0;width:0;height:0;}
-.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:22px;cursor:pointer;transition:background .3s;}
-.toggle-slider::before{content:'';position:absolute;height:16px;width:16px;left:3px;top:3px;background:var(--muted);border-radius:50%;transition:transform .3s,background .3s;}
-.toggle input:checked+.toggle-slider{background:rgba(245,166,35,.25);}
-.toggle input:checked+.toggle-slider::before{transform:translateX(18px);background:var(--accent);}
+    .brand-sub {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
 
-/* ── Calendar connect ── */
-.calendar-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--panel);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;}
-.cal-dot{width:10px;height:10px;border-radius:50%;}
-.cal-dot.connected{background:var(--success);box-shadow:0 0 8px var(--success);}
-.cal-dot.disconnected{background:var(--muted);}
-.cal-status-text{font-size:13px;}
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .2s;
+      border-left: 3px solid transparent;
+    }
 
-/* ── Users table ── */
-.user-row{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(30,37,56,.5);}
-.user-row:last-child{border-bottom:none;}
-.user-phone{font-family:var(--font-mono);font-size:12px;color:var(--accent);}
-.user-name-cell{font-size:13px;}
-.user-appt-count{font-size:12px;color:var(--muted);text-align:right;}
+    .nav-item:hover {
+      background: rgba(255, 255, 255, .03);
+      color: var(--text);
+    }
 
-/* ── Date picker ── */
-.date-picker-row{display:flex;align-items:center;gap:12px;margin-bottom:20px;}
-.date-picker-row label{font-size:12px;color:var(--muted);}
-.date-picker-row input[type="date"]{background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;font-family:var(--font-body);}
-.date-picker-row input[type="date"]:focus{border-color:var(--accent);}
+    .nav-item.active {
+      color: var(--accent);
+      border-left-color: var(--accent);
+      background: rgba(245, 166, 35, .06);
+    }
 
-/* ── Toast ── */
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;}
-.toast{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 18px;font-size:13px;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);animation:slide-in .3s ease;max-width:320px;}
-.toast.success{border-left:3px solid var(--success);}
-.toast.error{border-left:3px solid var(--danger);}
-.toast.info{border-left:3px solid var(--info);}
-@keyframes slide-in{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+    .nav-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+    }
 
-/* ── Login ── */
-#adminLogin{position:fixed;inset:0;background:rgba(10,12,16,.97);backdrop-filter:blur(10px);z-index:9000;display:flex;align-items:center;justify-content:center;}
-#adminLogin.hidden{display:none;}
-.login-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:44px 40px;width:400px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6);}
-.login-logo{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
-.login-logo-mark{width:48px;height:48px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:12px;display:grid;place-items:center;font-family:var(--font-display);font-size:20px;font-weight:700;color:#0a0c10;}
-.login-logo-text h2{font-family:var(--font-display);font-size:20px;color:var(--accent);}
-.login-logo-text p{font-size:11px;color:var(--muted);margin-top:2px;}
-.login-field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
-.login-field label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
-.login-field input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;padding:11px 14px;outline:none;transition:border-color .2s;}
-.login-field input:focus{border-color:var(--accent);}
-.login-btn{width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0c10;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;transition:opacity .2s;}
-.login-btn:hover{opacity:.88;}.login-btn:disabled{opacity:.5;cursor:not-allowed;}
+    .nav-section {
+      font-size: 9px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 16px 20px 6px;
+      margin-top: 4px;
+    }
 
-.empty-state{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;}
-.empty-state span{font-size:32px;display:block;margin-bottom:10px;}
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
-/* ── Prompt preview ── */
-.prompt-preview{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;font-family:var(--font-mono);color:var(--muted);white-space:pre-wrap;max-height:200px;overflow-y:auto;margin-top:12px;line-height:1.6;}
-</style>
+    .top-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .top-bar-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .top-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .admin-badge {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .admin-email {
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      border: none;
+      font-family: var(--font-body);
+      font-weight: 500;
+      transition: all .2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #0a0c10;
+    }
+
+    .btn-primary:hover {
+      opacity: .88;
+    }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-danger {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .btn-danger:hover {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 12px;
+    }
+
+    .content-area {
+      flex: 1;
+      padding: 28px;
+      overflow-y: auto;
+    }
+
+    /* Tabs */
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+
+    .stat-card .stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .05em;
+      margin-bottom: 8px;
+    }
+
+    .stat-card .stat-value {
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .stat-card .stat-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .stat-card.accent .stat-value {
+      color: var(--accent);
+    }
+
+    .stat-card.success .stat-value {
+      color: var(--success);
+    }
+
+    .stat-card.danger .stat-value {
+      color: var(--danger);
+    }
+
+    /* Section cards */
+    .section-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .section-card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-card-header h3 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .section-card-body {
+      padding: 20px;
+    }
+
+    /* Appointment table */
+    .appt-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .appt-table th {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .appt-table td {
+      padding: 12px 14px;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(30, 37, 56, .5);
+    }
+
+    .appt-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .appt-table tr:hover td {
+      background: rgba(255, 255, 255, .015);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      font-size: 10px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      letter-spacing: .04em;
+      font-weight: 500;
+    }
+
+    .tag.booked {
+      background: rgba(34, 197, 94, .12);
+      color: var(--success);
+    }
+
+    .tag.cancelled {
+      background: rgba(239, 68, 68, .12);
+      color: var(--danger);
+    }
+
+    .tag.rescheduled {
+      background: rgba(96, 165, 250, .12);
+      color: var(--info);
+    }
+
+    /* Forms */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-field label {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .04em;
+    }
+
+    .form-field input,
+    .form-field select,
+    .form-field textarea {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+      appearance: none;
+    }
+
+    .form-field input:focus,
+    .form-field select:focus,
+    .form-field textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .form-field select option {
+      background: var(--bg);
+    }
+
+    .form-field textarea {
+      resize: vertical;
+      min-height: 80px;
+      line-height: 1.5;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .form-section-title {
+      font-size: 11px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 20px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .form-section-title:first-child {
+      margin-top: 0;
+    }
+
+    /* Toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--text);
+      padding: 8px 0;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 22px;
+      cursor: pointer;
+      transition: background .3s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      top: 3px;
+      background: var(--muted);
+      border-radius: 50%;
+      transition: transform .3s, background .3s;
+    }
+
+    .toggle input:checked+.toggle-slider {
+      background: rgba(245, 166, 35, .25);
+    }
+
+    .toggle input:checked+.toggle-slider::before {
+      transform: translateX(18px);
+      background: var(--accent);
+    }
+
+    /* Calendar */
+    .calendar-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 16px;
+    }
+
+    .cal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .cal-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .cal-dot.disconnected {
+      background: var(--muted);
+    }
+
+    .cal-status-text {
+      font-size: 13px;
+    }
+
+    /* Calendar Wizard */
+    .cal-wizard-header {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 28px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .cwiz-step {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-shrink: 0;
+    }
+
+    .cwiz-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    .cwiz-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      border: 2px solid var(--border);
+      color: var(--muted);
+      background: var(--bg);
+      transition: all .25s;
+      position: relative;
+    }
+
+    .cwiz-circle.done {
+      background: rgba(34, 197, 94, .15);
+      border-color: var(--success);
+      color: var(--success);
+    }
+
+    .cwiz-circle.active {
+      background: rgba(245, 166, 35, .15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .cwiz-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .04em;
+      white-space: nowrap;
+      text-align: center;
+      max-width: 72px;
+      line-height: 1.3;
+    }
+
+    .cwiz-label.active {
+      color: var(--accent);
+    }
+
+    .cwiz-label.done {
+      color: var(--success);
+    }
+
+    .cwiz-connector {
+      width: 40px;
+      height: 2px;
+      background: var(--border);
+      margin: 0 2px;
+      margin-bottom: 18px;
+      transition: background .3s;
+    }
+
+    .cwiz-connector.done {
+      background: var(--success);
+    }
+
+    .cwiz-panel {
+      display: none;
+    }
+
+    .cwiz-panel.active {
+      display: block;
+    }
+
+    .step-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      margin-bottom: 16px;
+    }
+
+    .step-card-num {
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .step-card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+
+    .step-card-body {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .step-card-body b {
+      color: var(--text);
+    }
+
+    .step-card-body .highlight {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .step-card-body .warn {
+      color: var(--warn);
+    }
+
+    .step-action-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 16px;
+      background: rgba(245, 166, 35, .12);
+      border: 1px solid rgba(245, 166, 35, .35);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all .2s;
+      font-family: var(--font-body);
+    }
+
+    .step-link-btn:hover {
+      background: rgba(245, 166, 35, .2);
+    }
+
+    .step-done-btn {
+      padding: 9px 18px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: all .2s;
+    }
+
+    .step-done-btn:hover {
+      border-color: var(--success);
+      color: var(--success);
+    }
+
+    .copy-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 12px;
+    }
+
+    .copy-val {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent);
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all .2s;
+      font-family: var(--font-body);
+    }
+
+    .copy-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .copy-btn.copied {
+      border-color: var(--success);
+      color: var(--success);
+    }
+
+    .email-capture {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 12px;
+    }
+
+    .email-capture label {
+      font-size: 11px;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 5px;
+      letter-spacing: .04em;
+    }
+
+    .email-capture input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .checklist {
+      list-style: none;
+      margin-top: 10px;
+    }
+
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      padding: 7px 0;
+      font-size: 13px;
+      color: var(--muted);
+      border-bottom: 1px solid rgba(30, 37, 56, .5);
+    }
+
+    .checklist li:last-child {
+      border-bottom: none;
+    }
+
+    .checklist li .ci {
+      font-size: 15px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .checklist li b {
+      color: var(--text);
+    }
+
+    .warning-box {
+      background: rgba(245, 158, 11, .07);
+      border: 1px solid rgba(245, 158, 11, .25);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: rgba(245, 158, 11, .85);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+
+    .success-box {
+      background: rgba(34, 197, 94, .07);
+      border: 1px solid rgba(34, 197, 94, .2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: rgba(34, 197, 94, .85);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+
+    .json-paste-wrap {
+      position: relative;
+      margin-top: 12px;
+    }
+
+    .json-paste-wrap textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 12px;
+      min-height: 130px;
+      outline: none;
+      line-height: 1.5;
+      transition: border-color .2s;
+    }
+
+    .json-paste-wrap textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .json-valid-tag {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+      letter-spacing: .04em;
+    }
+
+    .json-valid-tag.ok {
+      background: rgba(34, 197, 94, .15);
+      color: var(--success);
+    }
+
+    .json-valid-tag.err {
+      background: rgba(239, 68, 68, .12);
+      color: var(--danger);
+    }
+
+    .cal-complete-card {
+      background: rgba(34, 197, 94, .06);
+      border: 1px solid rgba(34, 197, 94, .25);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .cal-complete-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+
+    .cal-complete-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--success);
+      margin-bottom: 6px;
+    }
+
+    .cal-complete-sub {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .progress-bar-wrap {
+      background: var(--border);
+      border-radius: 4px;
+      height: 4px;
+      margin-bottom: 24px;
+    }
+
+    .progress-bar-fill {
+      height: 4px;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width .4s ease;
+    }
+
+    .microstep {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 10px;
+    }
+
+    .ms-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: rgba(245, 166, 35, .12);
+      border: 1px solid rgba(245, 166, 35, .3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .ms-body {
+      flex: 1;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .ms-body b {
+      color: var(--text);
+    }
+
+    .ms-body em {
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* Users */
+    .user-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(30, 37, 56, .5);
+    }
+
+    .user-row:last-child {
+      border-bottom: none;
+    }
+
+    .user-phone {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent);
+    }
+
+    .user-name-cell {
+      font-size: 13px;
+    }
+
+    .user-appt-count {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    /* Date picker */
+    .date-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .date-picker-row label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .date-picker-row input[type="date"] {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 12px;
+      font-size: 13px;
+      outline: none;
+      font-family: var(--font-body);
+    }
+
+    .date-picker-row input[type="date"]:focus {
+      border-color: var(--accent);
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 13px;
+      color: var(--text);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, .5);
+      animation: slide-in .3s ease;
+      max-width: 320px;
+    }
+
+    .toast.success {
+      border-left: 3px solid var(--success);
+    }
+
+    .toast.error {
+      border-left: 3px solid var(--danger);
+    }
+
+    .toast.info {
+      border-left: 3px solid var(--info);
+    }
+
+    @keyframes slide-in {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    /* Login */
+    #adminLogin {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 12, 16, .97);
+      backdrop-filter: blur(10px);
+      z-index: 9000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #adminLogin.hidden {
+      display: none;
+    }
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 44px 40px;
+      width: 400px;
+      max-width: 92vw;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+    }
+
+    .login-logo {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+
+    .login-logo-mark {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      color: #0a0c10;
+    }
+
+    .login-logo-text h2 {
+      font-family: var(--font-display);
+      font-size: 20px;
+      color: var(--accent);
+    }
+
+    .login-logo-text p {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .login-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .login-field label {
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .login-field input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    .login-field input:focus {
+      border-color: var(--accent);
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #0a0c10;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity .2s;
+    }
+
+    .login-btn:hover {
+      opacity: .88;
+    }
+
+    .login-btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .empty-state span {
+      font-size: 32px;
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    /* ── Bot Config — NEW UX COMPONENTS ── */
+
+    /* Inner tab bar inside bot config */
+    .config-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+
+    .config-tab {
+      padding: 10px 18px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all .2s;
+    }
+
+    .config-tab:hover {
+      color: var(--text);
+    }
+
+    .config-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 500;
+    }
+
+    .config-panel {
+      display: none;
+    }
+
+    .config-panel.active {
+      display: block;
+    }
+
+    /* Voice persona cards */
+    .voice-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    .voice-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      cursor: pointer;
+      transition: all .2s;
+      position: relative;
+    }
+
+    .voice-card:hover {
+      border-color: rgba(245, 166, 35, .4);
+    }
+
+    .voice-card.selected {
+      border-color: var(--accent);
+      background: rgba(245, 166, 35, .06);
+    }
+
+    .voice-card.selected::after {
+      content: '✓';
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .vc-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+
+    .vc-simran .vc-avatar {
+      background: rgba(245, 166, 35, .15);
+    }
+
+    .vc-ritu .vc-avatar {
+      background: rgba(96, 165, 250, .15);
+    }
+
+    .vc-amit .vc-avatar {
+      background: rgba(34, 197, 94, .15);
+    }
+
+    .vc-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .vc-gender {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .vc-tone-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .vc-simran .vc-tone-label {
+      color: var(--accent);
+    }
+
+    .vc-ritu .vc-tone-label {
+      color: var(--info);
+    }
+
+    .vc-amit .vc-tone-label {
+      color: var(--success);
+    }
+
+    .vc-desc {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .vc-sample {
+      font-size: 11px;
+      font-style: italic;
+      margin-top: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      line-height: 1.4;
+    }
+
+    .vc-simran .vc-sample {
+      background: rgba(245, 166, 35, .07);
+      color: rgba(245, 166, 35, .7);
+    }
+
+    .vc-ritu .vc-sample {
+      background: rgba(96, 165, 250, .07);
+      color: rgba(96, 165, 250, .7);
+    }
+
+    .vc-amit .vc-sample {
+      background: rgba(34, 197, 94, .07);
+      color: rgba(34, 197, 94, .7);
+    }
+
+    /* Language selector */
+    .lang-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .lang-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: all .2s;
+      text-align: center;
+    }
+
+    .lang-card:hover {
+      border-color: rgba(245, 166, 35, .4);
+    }
+
+    .lang-card.selected {
+      border-color: var(--accent);
+      background: rgba(245, 166, 35, .06);
+    }
+
+    .lc-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .lc-code {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+    }
+
+    /* Business hours visual */
+    .hours-visual {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-top: 10px;
+    }
+
+    .hours-bar-track {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      position: relative;
+      margin: 10px 0 6px;
+    }
+
+    .hours-bar-fill {
+      height: 8px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 4px;
+      position: absolute;
+      transition: all .3s;
+    }
+
+    .hours-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* Context pills */
+    .pill-section-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+
+    .ctx-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      background: var(--bg);
+      transition: all .15s;
+      user-select: none;
+    }
+
+    .ctx-pill:hover {
+      border-color: rgba(245, 166, 35, .5);
+      color: var(--text);
+    }
+
+    .ctx-pill.on {
+      background: rgba(245, 166, 35, .1);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .ctx-pill .ck {
+      display: none;
+      font-size: 10px;
+    }
+
+    .ctx-pill.on .ck {
+      display: inline;
+    }
+
+    /* Capability grid */
+    .cap-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 12px 0;
+    }
+
+    .cap-item {
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .cap-item.yes {
+      background: rgba(34, 197, 94, .07);
+      border: 1px solid rgba(34, 197, 94, .2);
+      color: #4ade80;
+    }
+
+    .cap-item.no {
+      background: rgba(255, 255, 255, .02);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .cap-item .cap-title {
+      font-weight: 600;
+      margin-bottom: 1px;
+      font-size: 11px;
+    }
+
+    .cap-item .cap-body {
+      font-size: 11px;
+      opacity: .8;
+    }
+
+    /* Live preview in config */
+    .preview-pane {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .preview-seg {
+      display: inline-flex;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 2px;
+      margin-bottom: 14px;
+    }
+
+    .preview-seg button {
+      background: none;
+      border: none;
+      border-radius: 99px;
+      padding: 4px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: all .15s;
+    }
+
+    .preview-seg button.on {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .sim-msg {
+      display: flex;
+      gap: 9px;
+      margin-bottom: 10px;
+      align-items: flex-start;
+    }
+
+    .sim-av {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .sim-av.patient {
+      background: rgba(96, 165, 250, .2);
+      color: var(--info);
+    }
+
+    .sim-av.bot {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #0a0c10;
+    }
+
+    .sim-bubble {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .sim-bubble .good {
+      color: var(--success);
+    }
+
+    .sim-bubble .weak {
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* Prompt preview */
+    .prompt-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--muted);
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+
+    /* Unsaved indicator */
+    .unsaved-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--warn);
+      display: inline-block;
+      margin-left: 6px;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: .4;
+      }
+    }
+
+    /* Hint box */
+    .hint-box {
+      background: rgba(245, 166, 35, .06);
+      border: 1px solid rgba(245, 166, 35, .2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: rgba(245, 166, 35, .8);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+  </style>
 </head>
+
 <body>
-<div class="toast-container" id="toastContainer"></div>
+  <div class="toast-container" id="toastContainer"></div>
 
-<!-- Admin Login -->
-<div id="adminLogin">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="login-logo-mark">સ</div>
-      <div class="login-logo-text">
-        <h2>SamaySetu Admin</h2>
-        <p>BUSINESS DASHBOARD</p>
+  <!-- Admin Login -->
+  <div id="adminLogin">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="login-logo-mark">સ</div>
+        <div class="login-logo-text">
+          <h2>SamaySetu Admin</h2>
+          <p>BUSINESS DASHBOARD</p>
+        </div>
       </div>
+      <div class="login-field">
+        <label>Email</label>
+        <input type="email" id="adminEmail" placeholder="admin@yourbusiness.com"
+          onkeydown="if(event.key==='Enter')doAdminLogin()" />
+      </div>
+      <div class="login-field">
+        <label>Password</label>
+        <input type="password" id="adminPassword" onkeydown="if(event.key==='Enter')doAdminLogin()" />
+      </div>
+      <button class="login-btn" id="adminLoginBtn" onclick="doAdminLogin()">→ &nbsp;Enter Dashboard</button>
     </div>
-    <div class="login-field">
-      <label>Email</label>
-      <input type="email" id="adminEmail" placeholder="admin@yourbusiness.com" onkeydown="if(event.key==='Enter')doAdminLogin()"/>
-    </div>
-    <div class="login-field">
-      <label>Password</label>
-      <input type="password" id="adminPassword" onkeydown="if(event.key==='Enter')doAdminLogin()"/>
-    </div>
-    <button class="login-btn" id="adminLoginBtn" onclick="doAdminLogin()">→ &nbsp;Enter Dashboard</button>
   </div>
-</div>
 
-<!-- Main app -->
-<div class="layout" id="adminApp" style="display:none">
-  <!-- Sidebar nav -->
-  <nav class="sidebar-nav">
-    <div class="brand">
-      <div class="brand-mark">સ</div>
-      <div class="brand-name">SamaySetu</div>
-      <div class="brand-sub">Admin Panel</div>
-    </div>
-    <div class="nav-section">Overview</div>
-    <div class="nav-item active" onclick="switchTab('dashboard')"><span class="nav-icon">📊</span>Dashboard</div>
-    <div class="nav-section">Appointments</div>
-    <div class="nav-item" onclick="switchTab('today')"><span class="nav-icon">📅</span>Today's Schedule</div>
-    <div class="nav-item" onclick="switchTab('appointments')"><span class="nav-icon">🗓</span>All Appointments</div>
-    <div class="nav-section">Customers</div>
-    <div class="nav-item" onclick="switchTab('customers')"><span class="nav-icon">👥</span>Customer List</div>
-    <div class="nav-section">Configuration</div>
-    <div class="nav-item" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
-    <div class="nav-item" onclick="switchTab('calendar')"><span class="nav-icon">📆</span>Calendar Connect</div>
-    <div style="flex:1;"></div>
-    <div class="nav-item" onclick="doAdminLogout()" style="color:var(--danger);"><span class="nav-icon">✕</span>Logout</div>
-  </nav>
-
-  <div class="main-content">
-    <div class="top-bar">
-      <div class="top-bar-title" id="topBarTitle">Dashboard</div>
-      <div class="top-bar-right">
-        <div class="admin-badge">
-          <span>👤</span>
-          <span class="admin-email" id="adminEmailDisplay">—</span>
-        </div>
-        <div style="font-size:12px;color:var(--muted);" id="businessNameDisplay">—</div>
+  <!-- Main app -->
+  <div class="layout" id="adminApp" style="display:none">
+    <nav class="sidebar-nav">
+      <div class="brand">
+        <div class="brand-mark">સ</div>
+        <div class="brand-name">SamaySetu</div>
+        <div class="brand-sub">Admin Panel</div>
       </div>
-    </div>
+      <div class="nav-section">Overview</div>
+      <div class="nav-item active" onclick="switchTab('dashboard')"><span class="nav-icon">📊</span>Dashboard</div>
+      <div class="nav-section">Appointments</div>
+      <div class="nav-item" onclick="switchTab('today')"><span class="nav-icon">📅</span>Today's Schedule</div>
+      <div class="nav-item" onclick="switchTab('appointments')"><span class="nav-icon">🗓</span>All Appointments</div>
+      <div class="nav-section">Customers</div>
+      <div class="nav-item" onclick="switchTab('customers')"><span class="nav-icon">👥</span>Customer List</div>
+      <div class="nav-section">Configuration</div>
+      <div class="nav-item" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
+      <div class="nav-item" onclick="switchTab('calendar')"><span class="nav-icon">📆</span>Calendar Connect</div>
+      <div style="flex:1;"></div>
+      <div class="nav-item" onclick="doAdminLogout()" style="color:var(--danger);"><span class="nav-icon">✕</span>Logout
+      </div>
+    </nav>
 
-    <div class="content-area">
-
-      <!-- DASHBOARD TAB -->
-      <div class="tab-panel active" id="tab-dashboard">
-        <div class="stats-grid" id="statsGrid">
-          <div class="stat-card accent"><div class="stat-label">Upcoming</div><div class="stat-value" id="st-upcoming">—</div><div class="stat-sub">confirmed appointments</div></div>
-          <div class="stat-card success"><div class="stat-label">Today</div><div class="stat-value" id="st-today">—</div><div class="stat-sub">appointments today</div></div>
-          <div class="stat-card"><div class="stat-label">Last 30 Days</div><div class="stat-value" id="st-30d">—</div><div class="stat-sub">bookings</div></div>
-          <div class="stat-card danger"><div class="stat-label">Cancellations</div><div class="stat-value" id="st-cancel">—</div><div class="stat-sub">last 30 days</div></div>
-          <div class="stat-card"><div class="stat-label">Customers</div><div class="stat-value" id="st-customers">—</div><div class="stat-sub">unique</div></div>
+    <div class="main-content">
+      <div class="top-bar">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="top-bar-title" id="topBarTitle">Dashboard</div>
+          <span id="unsavedIndicator" style="display:none;"><span class="unsaved-dot"></span></span>
         </div>
-
-        <div class="section-card">
-          <div class="section-card-header">
-            <h3>Today's Appointments</h3>
-            <button class="btn btn-ghost btn-sm" onclick="loadToday()">Refresh</button>
+        <div class="top-bar-right">
+          <div class="admin-badge">
+            <span>👤</span>
+            <span class="admin-email" id="adminEmailDisplay">—</span>
           </div>
-          <div class="section-card-body" id="dashTodayBody">
-            <div class="empty-state"><span>📅</span>Loading today's schedule...</div>
-          </div>
+          <div style="font-size:12px;color:var(--muted);" id="businessNameDisplay">—</div>
         </div>
       </div>
 
-      <!-- TODAY TAB -->
-      <div class="tab-panel" id="tab-today">
-        <div class="date-picker-row">
-          <label>View date:</label>
-          <input type="date" id="todayDatePicker" onchange="loadAppointmentsForDate()"/>
-          <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Load</button>
-        </div>
-        <div class="section-card">
-          <div class="section-card-header">
-            <h3 id="todayTableTitle">Appointments</h3>
-            <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Refresh</button>
+      <div class="content-area">
+
+        <!-- DASHBOARD TAB -->
+        <div class="tab-panel active" id="tab-dashboard">
+          <div class="stats-grid" id="statsGrid">
+            <div class="stat-card accent">
+              <div class="stat-label">Upcoming</div>
+              <div class="stat-value" id="st-upcoming">—</div>
+              <div class="stat-sub">confirmed appointments</div>
+            </div>
+            <div class="stat-card success">
+              <div class="stat-label">Today</div>
+              <div class="stat-value" id="st-today">—</div>
+              <div class="stat-sub">appointments today</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Last 30 Days</div>
+              <div class="stat-value" id="st-30d">—</div>
+              <div class="stat-sub">bookings</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-label">Cancellations</div>
+              <div class="stat-value" id="st-cancel">—</div>
+              <div class="stat-sub">last 30 days</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Customers</div>
+              <div class="stat-value" id="st-customers">—</div>
+              <div class="stat-sub">unique</div>
+            </div>
           </div>
-          <div class="section-card-body" id="todayTableBody">
-            <div class="empty-state"><span>📅</span>Select a date above</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ALL APPOINTMENTS TAB -->
-      <div class="tab-panel" id="tab-appointments">
-        <div class="date-picker-row">
-          <label>From:</label>
-          <input type="date" id="fromDate"/>
-          <label>To:</label>
-          <input type="date" id="toDate"/>
-          <button class="btn btn-primary btn-sm" onclick="loadAppointmentRange()">Search</button>
-        </div>
-        <div class="section-card">
-          <div class="section-card-header">
-            <h3>Appointments</h3>
-          </div>
-          <div class="section-card-body" id="allApptBody">
-            <div class="empty-state"><span>🗓</span>Select date range and search</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- CUSTOMERS TAB -->
-      <div class="tab-panel" id="tab-customers">
-        <div class="section-card">
-          <div class="section-card-header">
-            <h3>Customer List</h3>
-            <button class="btn btn-ghost btn-sm" onclick="loadCustomers()">Refresh</button>
-          </div>
-          <div class="section-card-body" id="customersBody">
-            <div class="empty-state"><span>👥</span>Loading customers...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOT CONFIG TAB -->
-      <div class="tab-panel" id="tab-botconfig">
-        <div class="section-card">
-          <div class="section-card-header"><h3>Bot Personality & Identity</h3></div>
-          <div class="section-card-body">
-            <div class="form-section-title">Business Identity</div>
-            <div class="form-grid">
-              <div class="form-field">
-                <label>Bot / Business Name</label>
-                <input type="text" id="cfg_bot_name" placeholder="e.g. Dr. Sharma's Clinic AI"/>
-              </div>
-              <div class="form-field">
-                <label>Receptionist Name</label>
-                <input type="text" id="cfg_receptionist_name" placeholder="e.g. Priya"/>
-              </div>
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Today's Appointments</h3>
+              <button class="btn btn-ghost btn-sm" onclick="loadToday()">Refresh</button>
             </div>
-            <div class="form-field" style="margin-top:14px;">
-              <label>Business Description (shown in greeting and bot intro)</label>
-              <textarea id="cfg_business_description" placeholder="e.g. a friendly dental clinic in Ahmedabad offering 30-minute checkup slots"></textarea>
-            </div>
-            <div class="form-field" style="margin-top:14px;">
-              <label>Welcome / Greeting Message (optional override)</label>
-              <input type="text" id="cfg_greeting_message" placeholder="e.g. નમસ્તે! Dr. Sharma's Clinic AI બોલે છે."/>
-            </div>
-
-            <div class="form-section-title">Voice & Language</div>
-            <div class="form-grid">
-              <div class="form-field">
-                <label>Language</label>
-                <select id="cfg_language_code">
-                  <option value="gu-IN">Gujarati (gu-IN)</option>
-                  <option value="hi-IN">Hindi (hi-IN)</option>
-                  <option value="en-IN">English India (en-IN)</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label>TTS Voice</label>
-                <select id="cfg_tts_speaker">
-                  <option value="simran">Simran (Female)</option>
-                  <option value="meera">Meera (Female)</option>
-                  <option value="arjun">Arjun (Male)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-section-title">Business Hours & Slots</div>
-            <div class="form-grid">
-              <div class="form-field">
-                <label>Opening Hour (24h)</label>
-                <input type="number" id="cfg_business_hours_start" min="0" max="23" placeholder="9"/>
-              </div>
-              <div class="form-field">
-                <label>Closing Hour (24h)</label>
-                <input type="number" id="cfg_business_hours_end" min="1" max="24" placeholder="18"/>
-              </div>
-            </div>
-            <div class="form-grid" style="margin-top:14px;">
-              <div class="form-field">
-                <label>Slot Duration (minutes)</label>
-                <select id="cfg_slot_duration_mins">
-                  <option value="15">15 min</option>
-                  <option value="30" selected>30 min</option>
-                  <option value="45">45 min</option>
-                  <option value="60">60 min</option>
-                  <option value="90">90 min</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label>Silence Timeout (ms)</label>
-                <input type="number" id="cfg_silence_timeout_ms" min="500" max="4000" placeholder="1500"/>
-              </div>
-            </div>
-
-            <div class="form-section-title">Advanced Prompt Customization</div>
-            <div class="form-field">
-              <label>Extra Prompt Context (appended to AI instructions)</label>
-              <textarea id="cfg_extra_prompt_context" placeholder="e.g. This clinic specializes in Ayurvedic treatments. Always mention that parking is free. The doctor speaks Gujarati and Hindi."></textarea>
-            </div>
-            <div style="margin-top:10px;font-size:12px;color:var(--muted);">
-              Preview of what the AI will receive:
-            </div>
-            <div class="prompt-preview" id="promptPreview">Save config to see the generated prompt preview.</div>
-
-            <div class="form-actions">
-              <button class="btn btn-primary" onclick="saveBotConfig()">💾 Save Configuration</button>
-              <button class="btn btn-ghost" onclick="loadBotConfig()">↺ Reset to Saved</button>
+            <div class="section-card-body" id="dashTodayBody">
+              <div class="empty-state"><span>📅</span>Loading today's schedule...</div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- CALENDAR CONNECT TAB -->
-      <div class="tab-panel" id="tab-calendar">
-        <div class="section-card">
-          <div class="section-card-header"><h3>Google Calendar Integration</h3></div>
-          <div class="section-card-body">
-            <div class="calendar-status" id="calStatusBar">
-              <div class="cal-dot disconnected" id="calDot"></div>
-              <div>
-                <div class="cal-status-text" id="calStatusText">Not connected</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="calStatusSub"></div>
-              </div>
+        <!-- TODAY TAB -->
+        <div class="tab-panel" id="tab-today">
+          <div class="date-picker-row">
+            <label>View date:</label>
+            <input type="date" id="todayDatePicker" onchange="loadAppointmentsForDate()" />
+            <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Load</button>
+          </div>
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3 id="todayTableTitle">Appointments</h3>
+              <button class="btn btn-ghost btn-sm" onclick="loadAppointmentsForDate()">Refresh</button>
             </div>
-
-            <div class="form-section-title">Connect a Google Calendar</div>
-            <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
-              Paste your Google Service Account JSON credentials below to connect your calendar. SamaySetu will use this to check availability and create/cancel events automatically.
-            </p>
-            <div class="form-field">
-              <label>Calendar ID (e.g. youremail@gmail.com or custom calendar ID)</label>
-              <input type="text" id="calendarId" placeholder="e.g. clinic@gmail.com"/>
-            </div>
-            <div class="form-field" style="margin-top:14px;">
-              <label>Service Account JSON</label>
-              <textarea id="serviceAccountJson" style="min-height:160px;font-family:var(--font-mono);font-size:11px;" placeholder='Paste the full contents of your service_account.json here...'></textarea>
-            </div>
-            <div class="form-actions">
-              <button class="btn btn-primary" onclick="connectCalendar()">🔗 Connect Calendar</button>
-              <button class="btn btn-ghost" onclick="checkCalendarStatus()">Check Status</button>
-            </div>
-
-            <div class="form-section-title" style="margin-top:24px;">Setup Instructions</div>
-            <div style="font-size:12px;color:var(--muted);line-height:1.8;">
-              <b style="color:var(--text);">1.</b> Go to <b>Google Cloud Console</b> → Create a Service Account<br>
-              <b style="color:var(--text);">2.</b> Download the JSON key file<br>
-              <b style="color:var(--text);">3.</b> Share your Google Calendar with the service account email (give it <b>Editor</b> access)<br>
-              <b style="color:var(--text);">4.</b> Paste the JSON and your calendar ID above
+            <div class="section-card-body" id="todayTableBody">
+              <div class="empty-state"><span>📅</span>Select a date above</div>
             </div>
           </div>
         </div>
-      </div>
 
-    </div><!-- content-area -->
-  </div><!-- main-content -->
-</div><!-- layout -->
+        <!-- ALL APPOINTMENTS TAB -->
+        <div class="tab-panel" id="tab-appointments">
+          <div class="date-picker-row">
+            <label>From:</label>
+            <input type="date" id="fromDate" />
+            <label>To:</label>
+            <input type="date" id="toDate" />
+            <button class="btn btn-primary btn-sm" onclick="loadAppointmentRange()">Search</button>
+          </div>
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Appointments</h3>
+            </div>
+            <div class="section-card-body" id="allApptBody">
+              <div class="empty-state"><span>🗓</span>Select date range and search</div>
+            </div>
+          </div>
+        </div>
 
-<script>
-// ── State ─────────────────────────────────────────────────────────────────────
-let adminToken = null;
-let adminSession = {};
+        <!-- CUSTOMERS TAB -->
+        <div class="tab-panel" id="tab-customers">
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Customer List</h3>
+              <button class="btn btn-ghost btn-sm" onclick="loadCustomers()">Refresh</button>
+            </div>
+            <div class="section-card-body" id="customersBody">
+              <div class="empty-state"><span>👥</span>Loading customers...</div>
+            </div>
+          </div>
+        </div>
 
-function showToast(msg, type='') {
-  const t = document.createElement('div');
-  t.className = 'toast' + (type ? ' '+type : '');
-  t.textContent = msg;
-  document.getElementById('toastContainer').appendChild(t);
-  setTimeout(() => t.remove(), 4000);
-}
+        <!-- BOT CONFIG TAB — REDESIGNED -->
+        <div class="tab-panel" id="tab-botconfig">
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Bot Configuration — <span id="cfgHeaderBotName" style="color:var(--accent);">your assistant</span>
+              </h3>
+            </div>
+            <div class="section-card-body">
 
-// ── Admin login ───────────────────────────────────────────────────────────────
-async function doAdminLogin() {
-  const email = document.getElementById('adminEmail').value.trim();
-  const pass  = document.getElementById('adminPassword').value;
-  if (!email || !pass) { showToast('Email and password required', 'error'); return; }
-  const btn = document.getElementById('adminLoginBtn');
-  btn.disabled = true; btn.textContent = 'Logging in…';
-  try {
-    const r = await fetch('/admin/login', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ email, password: pass })
-    });
-    if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || 'Login failed'); }
-    const data = await r.json();
-    adminToken = data.token;
-    adminSession = data;
-    localStorage.setItem('admin_token', adminToken);
-    localStorage.setItem('admin_session', JSON.stringify(data));
-    enterDashboard(data);
-  } catch(e) {
-    showToast(e.message, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = '→  Enter Dashboard';
-  }
-}
-function doAdminLogout() {
-  fetch('/admin/logout', { headers: { 'X-Admin-Token': adminToken } }).catch(()=>{});
-  adminToken = null; adminSession = {};
-  localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
-  document.getElementById('adminLogin').classList.remove('hidden');
-  document.getElementById('adminApp').style.display = 'none';
-}
-function enterDashboard(session) {
-  document.getElementById('adminLogin').classList.add('hidden');
-  document.getElementById('adminApp').style.display = 'flex';
-  document.getElementById('adminEmailDisplay').textContent = session.email || '—';
-  document.getElementById('businessNameDisplay').textContent = session.business_name || '';
-  loadStats();
-  loadToday();
-  loadBotConfig();
-  checkCalendarStatus();
-  // Set today in date pickers
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('todayDatePicker').value = today;
-  const lastWeek = new Date(Date.now() - 7*86400000).toISOString().split('T')[0];
-  document.getElementById('fromDate').value = lastWeek;
-  document.getElementById('toDate').value = today;
-}
-async function checkStoredLogin() {
-  const token = localStorage.getItem('admin_token');
-  const sess  = localStorage.getItem('admin_session');
-  if (!token || !sess) return;
-  // Verify token is still valid
-  try {
-    const r = await fetch('/admin/stats', { headers: { 'X-Admin-Token': token } });
-    if (!r.ok) throw new Error('expired');
-    adminToken = token;
-    adminSession = JSON.parse(sess);
-    enterDashboard(adminSession);
-  } catch(e) {
-    localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
-  }
-}
+              <!-- Inner tab navigation -->
+              <div class="config-tabs">
+                <div class="config-tab active" onclick="switchConfigTab('identity',this)">Identity</div>
+                <div class="config-tab" onclick="switchConfigTab('voice',this)">Voice &amp; Language</div>
+                <div class="config-tab" onclick="switchConfigTab('hours',this)">Hours &amp; Slots</div>
+                <div class="config-tab" onclick="switchConfigTab('teach',this)">Teach <span
+                    id="cfgTabBotName">Shelvi</span></div>
+                <div class="config-tab" onclick="switchConfigTab('preview',this)">Live Preview</div>
+              </div>
 
-// ── Tab navigation ────────────────────────────────────────────────────────────
-const tabTitles = {
-  dashboard: 'Dashboard', today: "Today's Schedule",
-  appointments: 'All Appointments', customers: 'Customers',
-  botconfig: 'Bot Configuration', calendar: 'Calendar Connect'
-};
-function switchTab(name) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => {
-    if (n.textContent.trim().toLowerCase().includes(name === 'today' ? "today" : name === 'botconfig' ? 'bot' : name === 'calendar' ? 'calendar' : name))
-      n.classList.add('active');
-  });
-  document.getElementById('topBarTitle').textContent = tabTitles[name] || name;
-  if (name === 'customers') loadCustomers();
-  if (name === 'today') loadAppointmentsForDate();
-}
+              <!-- IDENTITY PANEL -->
+              <div class="config-panel active" id="cpanel-identity">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label>Business / Bot Name</label>
+                    <input type="text" id="cfg_bot_name" placeholder="e.g. Dr. Sharma's Clinic"
+                      oninput="onCfgChange()" />
+                    <span style="font-size:11px;color:var(--muted);margin-top:2px;">This name appears in greetings and
+                      throughout the assistant's speech.</span>
+                  </div>
+                  <div class="form-field">
+                    <label>Receptionist Name</label>
+                    <input type="text" id="cfg_receptionist_name" placeholder="e.g. Priya" oninput="onCfgChange()" />
+                    <span style="font-size:11px;color:var(--muted);margin-top:2px;">Patients will hear this name when
+                      the assistant introduces itself.</span>
+                  </div>
+                </div>
+                <div class="form-field" style="margin-top:16px;">
+                  <label>Business Description</label>
+                  <textarea id="cfg_business_description"
+                    placeholder="e.g. a trusted family clinic in Vadodara offering 45-minute consultations"
+                    oninput="onCfgChange()"></textarea>
+                  <span style="font-size:11px;color:var(--muted);margin-top:2px;">Used in the assistant's opening phrase
+                    — keep it short and natural.</span>
+                </div>
+                <div class="form-field" style="margin-top:16px;">
+                  <label>Opening Greeting <span style="color:var(--muted);font-size:10px;">(optional — leave blank for
+                      auto-generated)</span></label>
+                  <input type="text" id="cfg_greeting_message"
+                    placeholder="e.g. ડૉક્ટર પટેલના ક્લિનિકમાં આપનું સ્વાગત છે." oninput="onCfgChange()" />
+                  <span style="font-size:11px;color:var(--muted);margin-top:2px;">Exact words spoken when a patient
+                    first connects. Must match the selected language.</span>
+                </div>
+              </div>
 
-// ── API helpers ───────────────────────────────────────────────────────────────
-async function apiFetch(path, options={}) {
-  const r = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken, ...(options.headers||{}) } });
-  if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || `API error ${r.status}`); }
-  return r.json();
-}
+              <!-- VOICE PANEL -->
+              <div class="config-panel" id="cpanel-voice">
+                <div class="hint-box" id="voiceHintBox">
+                  Choosing the right voice shapes how patients feel on the call. Pick the one that best matches your
+                  clinic's personality.
+                </div>
+                <div
+                  style="font-size:12px;color:var(--muted);margin-bottom:12px;letter-spacing:.06em;text-transform:uppercase;font-size:11px;">
+                  Select voice</div>
+                <div class="voice-cards">
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
-async function loadStats() {
-  try {
-    const stats = await apiFetch('/admin/stats');
-    document.getElementById('st-upcoming').textContent  = stats.upcoming ?? '—';
-    document.getElementById('st-today').textContent     = stats.today_total ?? '—';
-    document.getElementById('st-30d').textContent       = stats.booked_30d ?? '—';
-    document.getElementById('st-cancel').textContent    = stats.cancelled_30d ?? '—';
-    document.getElementById('st-customers').textContent = stats.unique_customers ?? '—';
-  } catch(e) { showToast('Could not load stats', 'error'); }
-}
+                  <div class="voice-card vc-simran" id="vc-simran" onclick="selectVoice('simran')">
+                    <div class="vc-avatar">🎙</div>
+                    <div class="vc-name">Simran</div>
+                    <div class="vc-gender">Female</div>
+                    <div class="vc-tone-label">Warm &amp; Natural</div>
+                    <div class="vc-desc">Soft, friendly tone with a natural cadence. Sounds like a trusted clinic staff
+                      member — never robotic.</div>
+                    <div class="vc-sample" id="simran-sample">"ડૉક્ટર પટેલના ક્લિનિકમાં આપનું સ્વાગત છે..."</div>
+                  </div>
 
-// ── Today / schedule ──────────────────────────────────────────────────────────
-async function loadToday() {
-  try {
-    const appts = await apiFetch('/admin/appointments/today');
-    renderApptTable(appts, 'dashTodayBody');
-  } catch(e) { showToast('Could not load today\'s schedule', 'error'); }
-}
-async function loadAppointmentsForDate() {
-  const date = document.getElementById('todayDatePicker').value;
-  if (!date) return;
-  document.getElementById('todayTableTitle').textContent = 'Appointments — ' + date;
-  try {
-    const appts = await apiFetch(`/admin/appointments?appt_date=${date}`);
-    renderApptTable(appts, 'todayTableBody');
-  } catch(e) { showToast('Could not load appointments', 'error'); }
-}
-async function loadAppointmentRange() {
-  const from = document.getElementById('fromDate').value;
-  const to   = document.getElementById('toDate').value;
-  if (!from || !to) { showToast('Select both dates', 'error'); return; }
-  try {
-    const appts = await apiFetch(`/admin/appointments?from_date=${from}T00:00:00&to_date=${to}T23:59:59`);
-    renderApptTable(appts, 'allApptBody');
-  } catch(e) { showToast('Could not load appointments', 'error'); }
-}
-function renderApptTable(appts, containerId) {
-  const el = document.getElementById(containerId);
-  if (!appts || appts.length === 0) {
-    el.innerHTML = '<div class="empty-state"><span>📭</span>No appointments found.</div>'; return;
-  }
-  el.innerHTML = `<table class="appt-table">
+                  <div class="voice-card vc-ritu" id="vc-ritu" onclick="selectVoice('ritu')">
+                    <div class="vc-avatar">🎙</div>
+                    <div class="vc-name">Ritu</div>
+                    <div class="vc-gender">Female</div>
+                    <div class="vc-tone-label">Clear &amp; Professional</div>
+                    <div class="vc-desc">Crisp, professional delivery. Ideal for clinics that want a polished, efficient
+                      assistant.</div>
+                    <div class="vc-sample" id="ritu-sample">"ડૉ. પટેલ ક્લિનિક. આપની appointment માટે..."</div>
+                  </div>
+
+                  <div class="voice-card vc-amit" id="vc-amit" onclick="selectVoice('amit')">
+                    <div class="vc-avatar">🎙</div>
+                    <div class="vc-name">Amit</div>
+                    <div class="vc-gender">Male</div>
+                    <div class="vc-tone-label">Calm &amp; Reassuring</div>
+                    <div class="vc-desc">Deep, steady male voice. Works well for practices where patients may feel
+                      anxious — ortho, dental, etc.</div>
+                    <div class="vc-sample" id="amit-sample">"ડૉ. પટેલ ક્લિનિક. હું Amit, આપની appointment..."</div>
+                  </div>
+
+                </div>
+                <input type="hidden" id="cfg_tts_speaker" value="simran" />
+
+                <div style="margin-top:24px;">
+                  <div
+                    style="font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;">
+                    Language</div>
+                  <div class="lang-cards">
+                    <div class="lang-card" id="lc-gu-IN" onclick="selectLang('gu-IN')">
+                      <div class="lc-name">Gujarati</div>
+                      <div class="lc-code">gu-IN</div>
+                    </div>
+                    <div class="lang-card" id="lc-hi-IN" onclick="selectLang('hi-IN')">
+                      <div class="lc-name">Hindi</div>
+                      <div class="lc-code">hi-IN</div>
+                    </div>
+                    <div class="lang-card" id="lc-en-IN" onclick="selectLang('en-IN')">
+                      <div class="lc-name">English</div>
+                      <div class="lc-code">en-IN</div>
+                    </div>
+                  </div>
+                  <input type="hidden" id="cfg_language_code" value="gu-IN" />
+                </div>
+              </div>
+
+              <!-- HOURS PANEL -->
+              <div class="config-panel" id="cpanel-hours">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label>Opening Hour (24h)</label>
+                    <input type="number" id="cfg_business_hours_start" min="0" max="23" placeholder="9"
+                      oninput="onCfgChange();updateHoursVisual()" />
+                  </div>
+                  <div class="form-field">
+                    <label>Closing Hour (24h)</label>
+                    <input type="number" id="cfg_business_hours_end" min="1" max="24" placeholder="18"
+                      oninput="onCfgChange();updateHoursVisual()" />
+                  </div>
+                </div>
+
+                <div class="hours-visual">
+                  <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Open hours — patients can book
+                    within this window</div>
+                  <div class="hours-bar-track">
+                    <div class="hours-bar-fill" id="hoursBarFill" style="left:37.5%;width:37.5%;"></div>
+                  </div>
+                  <div class="hours-labels">
+                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
+                  </div>
+                  <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text);" id="hoursReadout">9:00
+                    AM — 6:00 PM</div>
+                </div>
+
+                <div class="form-grid" style="margin-top:20px;">
+                  <div class="form-field">
+                    <label>Appointment Slot Duration</label>
+                    <select id="cfg_slot_duration_mins" onchange="onCfgChange()">
+                      <option value="15">15 min — Quick consultations</option>
+                      <option value="30" selected>30 min — Standard slot</option>
+                      <option value="45">45 min — Extended slot</option>
+                      <option value="60">60 min — Full hour</option>
+                      <option value="90">90 min — Long session</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label>Silence Timeout (ms)</label>
+                    <input type="number" id="cfg_silence_timeout_ms" min="500" max="4000" placeholder="1500"
+                      oninput="onCfgChange()" />
+                    <span style="font-size:11px;color:var(--muted);margin-top:2px;">How long Shelvi waits after silence
+                      before responding. 1500ms is recommended.</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TEACH PANEL -->
+              <div class="config-panel" id="cpanel-teach">
+                <div class="hint-box">
+                  This is where you give <strong id="hintBotName" style="color:var(--accent);">your assistant</strong>
+                  extra knowledge about your clinic.
+                  Without this, she can book appointments — but she won't know your specialties, fees, or any special
+                  instructions.
+                </div>
+
+                <div class="pill-section-label">Quick add — tap what applies</div>
+
+                <div class="pill-section-label" style="margin-top:4px;opacity:.6;">Practical info</div>
+                <div class="pill-row">
+                  <div class="ctx-pill" data-text="Free parking is available behind the building."
+                    onclick="togglePill(this)"><span class="ck">✓</span> Free parking</div>
+                  <div class="ctx-pill" data-text="We accept both cash and card payments." onclick="togglePill(this)">
+                    <span class="ck">✓</span> Cash &amp; card accepted</div>
+                  <div class="ctx-pill" data-text="Typical waiting time is 10 to 15 minutes."
+                    onclick="togglePill(this)"><span class="ck">✓</span> Wait ~10–15 min</div>
+                  <div class="ctx-pill" data-text="Please bring any previous reports or prescriptions."
+                    onclick="togglePill(this)"><span class="ck">✓</span> Bring reports</div>
+                  <div class="ctx-pill" data-text="The clinic is wheelchair accessible." onclick="togglePill(this)">
+                    <span class="ck">✓</span> Wheelchair access</div>
+                </div>
+
+                <div class="pill-section-label" style="opacity:.6;">Doctor &amp; languages</div>
+                <div class="pill-row">
+                  <div class="ctx-pill" data-text="The doctor speaks Gujarati and Hindi." onclick="togglePill(this)">
+                    <span class="ck">✓</span> Doctor speaks Hindi</div>
+                  <div class="ctx-pill" data-text="The doctor also speaks English." onclick="togglePill(this)"><span
+                      class="ck">✓</span> Doctor speaks English</div>
+                  <div class="ctx-pill" data-text="A female doctor is available on request." onclick="togglePill(this)">
+                    <span class="ck">✓</span> Female doctor available</div>
+                </div>
+
+                <div style="margin-bottom:10px;">
+                  <div class="pill-section-label" style="opacity:.6;">What <span class="dynamic-bot-name">your
+                      assistant</span> can do automatically</div>
+                  <div class="cap-grid">
+                    <div class="cap-item yes">
+                      <div class="cap-title">✓ Book appointments</div>
+                      <div class="cap-body">Checks your Google Calendar in real time</div>
+                    </div>
+                    <div class="cap-item yes">
+                      <div class="cap-title">✓ Cancel appointments</div>
+                      <div class="cap-body">Removes existing bookings on patient request</div>
+                    </div>
+                    <div class="cap-item yes">
+                      <div class="cap-title">✓ Reschedule</div>
+                      <div class="cap-body">Moves a booking to a new date / time</div>
+                    </div>
+                    <div class="cap-item yes">
+                      <div class="cap-title">✓ Suggest free slots</div>
+                      <div class="cap-body">Finds next available time if slot is busy</div>
+                    </div>
+                    <div class="cap-item no">
+                      <div class="cap-title">× Fees &amp; pricing</div>
+                      <div class="cap-body">Add these below — she doesn't know your rates</div>
+                    </div>
+                    <div class="cap-item no">
+                      <div class="cap-title">× Specific services</div>
+                      <div class="cap-body">Tell her what specialties you offer below</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-field">
+                  <label>Anything else <span class="dynamic-bot-name" style="color:var(--accent);">your assistant</span>
+                    should know</label>
+                  <textarea id="cfg_extra_prompt_context"
+                    placeholder="e.g. We specialise in orthopaedic consultations. Consultation fee is ₹300. New patients should arrive 10 minutes early."
+                    oninput="onCfgChange();updateWordCount()" style="min-height:100px;"></textarea>
+                  <div style="display:flex;justify-content:space-between;margin-top:4px;">
+                    <span style="font-size:11px;color:var(--muted);">Write naturally — as if briefing a new staff
+                      member.</span>
+                    <span style="font-size:11px;color:var(--muted);" id="ctxWordCount">0 words</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- PREVIEW PANEL -->
+              <div class="config-panel" id="cpanel-preview">
+                <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+                  This is how <strong id="previewBotLabel" style="color:var(--text);">your assistant</strong> will sound
+                  to patients — based on your current settings.
+                </div>
+                <div class="preview-pane">
+                  <div class="preview-seg">
+                    <button class="on" onclick="switchSim('book',this)">Booking call</button>
+                    <button onclick="switchSim('faq',this)">Patient question</button>
+                    <button onclick="switchSim('busy',this)">Slot busy</button>
+                  </div>
+                  <div id="simOutput"></div>
+                </div>
+
+                <div style="margin-top:20px;">
+                  <div
+                    style="font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;">
+                    Prompt sent to AI (auto-generated from your settings)</div>
+                  <div class="prompt-preview" id="promptPreview">Save config to see the generated prompt.</div>
+                </div>
+              </div>
+
+              <!-- Save actions (always visible) -->
+              <div class="form-actions" style="border-top:1px solid var(--border);padding-top:20px;margin-top:8px;">
+                <button class="btn btn-primary" onclick="saveBotConfig()">💾 Save Configuration</button>
+                <button class="btn btn-ghost" onclick="loadBotConfig()">↺ Reset to Saved</button>
+                <span id="saveStatusMsg"
+                  style="font-size:12px;color:var(--muted);margin-left:4px;align-self:center;"></span>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- CALENDAR TAB — WIZARD -->
+        <div class="tab-panel" id="tab-calendar">
+
+          <!-- Connected banner -->
+          <div id="cal-connected-banner" style="display:none;margin-bottom:20px;">
+            <div class="cal-complete-card">
+              <div class="cal-complete-icon">&#128198;</div>
+              <div class="cal-complete-title">Google Calendar connected</div>
+              <div class="cal-complete-sub" id="cal-banner-sub">Your appointments are syncing in real time.</div>
+              <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;">
+                <button class="btn btn-ghost btn-sm" onclick="checkCalendarStatus()">Refresh status</button>
+                <button class="btn btn-ghost btn-sm" onclick="showReconnectWizard()">Reconnect / Change
+                  calendar</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Wizard -->
+          <div id="cal-wizard-wrap">
+            <div class="section-card">
+              <div class="section-card-header" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <h3>Connect Your Google Calendar</h3>
+                <div style="font-size:12px;color:var(--muted);">Follow these 4 steps — takes about 5 minutes. We’ll
+                  guide you through each one.</div>
+              </div>
+              <div class="section-card-body">
+
+                <div class="progress-bar-wrap">
+                  <div class="progress-bar-fill" id="wizProgressBar" style="width:0%"></div>
+                </div>
+
+                <!-- Step indicator -->
+                <div class="cal-wizard-header">
+                  <div class="cwiz-step">
+                    <div class="cwiz-node" onclick="goWizStep(1)">
+                      <div class="cwiz-circle active" id="wc1">1</div>
+                      <div class="cwiz-label active" id="wl1">Enable API</div>
+                    </div>
+                  </div>
+                  <div class="cwiz-connector" id="wconn1"></div>
+                  <div class="cwiz-step">
+                    <div class="cwiz-node" onclick="goWizStep(2)">
+                      <div class="cwiz-circle" id="wc2">2</div>
+                      <div class="cwiz-label" id="wl2">Create Key</div>
+                    </div>
+                  </div>
+                  <div class="cwiz-connector" id="wconn2"></div>
+                  <div class="cwiz-step">
+                    <div class="cwiz-node" onclick="goWizStep(3)">
+                      <div class="cwiz-circle" id="wc3">3</div>
+                      <div class="cwiz-label" id="wl3">Calendar ID</div>
+                    </div>
+                  </div>
+                  <div class="cwiz-connector" id="wconn3"></div>
+                  <div class="cwiz-step">
+                    <div class="cwiz-node" onclick="goWizStep(4)">
+                      <div class="cwiz-circle" id="wc4">4</div>
+                      <div class="cwiz-label" id="wl4">Share Access</div>
+                    </div>
+                  </div>
+                  <div class="cwiz-connector" id="wconn4"></div>
+                  <div class="cwiz-step">
+                    <div class="cwiz-node" onclick="goWizStep(5)">
+                      <div class="cwiz-circle" id="wc5">5</div>
+                      <div class="cwiz-label" id="wl5">Paste &amp; Connect</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- STEP 1 -->
+                <div class="cwiz-panel active" id="cwp-1">
+                  <div class="step-card">
+                    <div class="step-card-num">Step 1 of 4 — One-time setup</div>
+                    <div class="step-card-title">Enable the Google Calendar API</div>
+                    <div class="step-card-body">
+                      Google requires you to “turn on” the Calendar feature before anything can use it.
+                      This is a one-click action inside Google Cloud Console.<br><br>
+                      <b>1.</b> Click the button below to open Google Cloud Console.<br>
+                      <b>2.</b> At the top, click <span class="highlight">Select a project</span> → <span
+                        class="highlight">New Project</span>.<br>
+                      &nbsp;&nbsp;&nbsp;&nbsp;Name it <span class="highlight">SamaySetu-Calendar</span> and click <span
+                        class="highlight">Create</span>.<br>
+                      <b>3.</b> In the search bar, type <span class="highlight">Google Calendar API</span>.<br>
+                      <b>4.</b> Click the result, then click the blue <span class="highlight">Enable</span>
+                      button.<br><br>
+                      <span class="warn">&#10022; Come back to this page once you have clicked Enable.</span>
+                    </div>
+                    <div class="step-action-row">
+                      <a class="step-link-btn"
+                        href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
+                        target="_blank">Open Google Cloud Console &#8599;</a>
+                      <button class="step-done-btn" onclick="markStepDone(1)">I enabled it — Next step →</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- STEP 2 -->
+                <div class="cwiz-panel" id="cwp-2">
+
+                  <!-- 2A: Create the account -->
+                  <div class="step-card">
+                    <div class="step-card-num">Step 2 of 4 — Part A</div>
+                    <div class="step-card-title">Create a Service Account</div>
+                    <div class="step-card-body">
+                      Think of this like creating a staff pass that lets SamaySetu access your calendar — without
+                      needing your Google password.<br><br>
+                      <b>1.</b> Click the button below to open the Service Accounts page.<br>
+                      <b>2.</b> Click <span class="highlight">+ Create Service Account</span> at the top.<br>
+                      <b>3.</b> In the name field, type <span class="highlight">samaysetu-sync</span>.<br>
+                      <b>4.</b> Click <span class="highlight">Create and Continue</span>, then <span
+                        class="highlight">Done</span>.<br><br>
+                      You will see your new account listed with an email ending in
+                      <span
+                        style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">@...iam.gserviceaccount.com</span>
+                    </div>
+                    <div class="step-action-row">
+                      <a class="step-link-btn" href="https://console.cloud.google.com/iam-admin/serviceaccounts"
+                        target="_blank">Open Service Accounts &#8599;</a>
+                    </div>
+                  </div>
+
+                  <!-- 2B: Copy the email -->
+                  <div class="step-card" style="border-color:rgba(245,166,35,.2);">
+                    <div class="step-card-num">Step 2 of 4 — Part B</div>
+                    <div class="step-card-title">Copy the service account email</div>
+                    <div class="step-card-body">
+                      In the list you will see a row for your new account. The email column shows something like:<br>
+                      <span
+                        style="font-family:var(--font-mono);font-size:11px;color:var(--accent);display:block;margin:6px 0;">samaysetu-sync@your-project-id.iam.gserviceaccount.com</span>
+                      Copy that email and paste it in the box below — you will need it in Step 4.
+                    </div>
+                    <div class="email-capture" style="margin-top:10px;">
+                      <label>Paste service account email here</label>
+                      <input type="email" id="serviceAccountEmail"
+                        placeholder="samaysetu-sync@your-project-id.iam.gserviceaccount.com"
+                        oninput="onServiceEmailInput()" />
+                    </div>
+                    <div id="emailSavedNote" style="display:none;font-size:11px;color:var(--success);margin-top:6px;">
+                      Saved — we'll show this again in Step 4.</div>
+                  </div>
+
+                  <!-- 2C: Download JSON key -->
+                  <div class="step-card">
+                    <div class="step-card-num">Step 2 of 4 — Part C</div>
+                    <div class="step-card-title">Download your JSON security key</div>
+                    <div class="step-card-body">
+                      Now you need to download the actual key file. Follow these exact clicks:
+                    </div>
+
+                    <div class="microstep">
+                      <div class="ms-num">1</div>
+                      <div class="ms-body">
+                        In the Service Accounts list, find your <span class="highlight">samaysetu-sync</span> row.<br>
+                        At the far right of that row, click the <span class="highlight">three vertical dots
+                          (&vellip;)</span> under the <b>Actions</b> column.
+                      </div>
+                    </div>
+
+                    <div class="microstep">
+                      <div class="ms-num">2</div>
+                      <div class="ms-body">
+                        A small dropdown menu appears with options like <em>Manage details, Manage permissions, Manage
+                          keys...</em><br>
+                        Click <span class="highlight">Manage keys</span>.
+                      </div>
+                    </div>
+
+                    <div class="microstep">
+                      <div class="ms-num">3</div>
+                      <div class="ms-body">
+                        You are now on the <b>Keys</b> page for your service account.<br>
+                        Click the <span class="highlight">Add key</span> button, then click <span
+                          class="highlight">Create new key</span> from the dropdown.
+                      </div>
+                    </div>
+
+                    <div class="microstep">
+                      <div class="ms-num">4</div>
+                      <div class="ms-body">
+                        A popup appears asking for the key type.<br>
+                        Make sure <span class="highlight">JSON</span> is selected (it says "Recommended" below it).<br>
+                        Click <span class="highlight">Create</span>.
+                      </div>
+                    </div>
+
+                    <div class="microstep" style="border-color:rgba(34,197,94,.3);">
+                      <div class="ms-num" style="background:rgba(34,197,94,.15);color:var(--success);">5</div>
+                      <div class="ms-body">
+                        <b>A file downloads automatically</b> to your computer — it is named something like<br>
+                        <span
+                          style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">your-project-name-xxxxxxxx.json</span><br>
+                        Keep this file safe — this is your private key.
+                      </div>
+                    </div>
+
+                    <div class="microstep" style="border-color:rgba(245,158,11,.3);">
+                      <div class="ms-num" style="background:rgba(245,158,11,.1);color:var(--warn);">6</div>
+                      <div class="ms-body">
+                        <b>Open the downloaded file:</b><br>
+                        &mdash; <b>Windows:</b> right-click the file &rarr; <span class="highlight">Open with</span>
+                        &rarr; <span class="highlight">Notepad</span><br>
+                        &mdash; <b>Mac:</b> right-click &rarr; <span class="highlight">Open with</span> &rarr; <span
+                          class="highlight">TextEdit</span><br><br>
+                        Press <span class="highlight">Ctrl+A</span> (Windows) or <span class="highlight">Cmd+A</span>
+                        (Mac) to select all,<br>
+                        then <span class="highlight">Ctrl+C</span> / <span class="highlight">Cmd+C</span> to copy the
+                        entire contents.
+                        You will paste this in the final step.
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div style="text-align:right;">
+                    <button class="step-done-btn" onclick="markStepDone(2)">I have my JSON file — Next &rarr;</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- STEP 3 -->
+              <div class="cwiz-panel" id="cwp-3">
+                <div class="step-card">
+                  <div class="step-card-num">Step 3 of 4</div>
+                  <div class="step-card-title">Find your Calendar ID</div>
+                  <div class="step-card-body">
+                    The Calendar ID tells SamaySetu <em>which</em> of your calendars to use.<br><br>
+                    <b>1.</b> Open <span class="highlight">Google Calendar</span> in your browser.<br>
+                    <b>2.</b> On the left, hover over the calendar you want → click the <span class="highlight">three
+                      dots (⋮)</span>.<br>
+                    <b>3.</b> Click <span class="highlight">Settings and sharing</span>.<br>
+                    <b>4.</b> Scroll down to <span class="highlight">Integrate calendar</span>.<br>
+                    <b>5.</b> Copy the <span class="highlight">Calendar ID</span> — it looks like your Gmail address or
+                    a long code.
+                  </div>
+                  <div class="step-action-row">
+                    <a class="step-link-btn" href="https://calendar.google.com" target="_blank">Open Google Calendar
+                      &#8599;</a>
+                  </div>
+                </div>
+                <div class="step-card" style="border-color:rgba(245,166,35,.2);">
+                  <div class="step-card-title" style="font-size:13px;">Paste your Calendar ID here</div>
+                  <input type="text" id="calendarId"
+                    style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:13px;outline:none;font-family:var(--font-mono);margin-top:8px;"
+                    placeholder="e.g. yourclinic@gmail.com" oninput="onCalIdInput()" />
+                  <div id="calIdNote" style="display:none;font-size:11px;color:var(--success);margin-top:6px;">Saved.
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <button class="step-done-btn" onclick="markStepDone(3)">Calendar ID saved — Next →</button>
+                </div>
+              </div>
+
+              <!-- STEP 4 -->
+              <div class="cwiz-panel" id="cwp-4">
+                <div class="step-card" style="border-color:rgba(245,158,11,.3);">
+                  <div class="step-card-num">Step 4 of 4 — Most important!</div>
+                  <div class="step-card-title">Share your calendar with SamaySetu</div>
+                  <div class="step-card-body">
+                    Without this step, SamaySetu cannot see or edit your calendar — this is the step most people
+                    miss.<br><br>
+                    <b>1.</b> In Google Calendar, open the same <span class="highlight">Settings and sharing</span> page
+                    from Step 3.<br>
+                    <b>2.</b> Scroll up to <span class="highlight">Share with specific people or groups</span>.<br>
+                    <b>3.</b> Click <span class="highlight">+ Add people</span> and paste this email:
+                  </div>
+                  <div class="copy-row" id="saEmailCopyRow">
+                    <div class="copy-val" id="saEmailDisplay">—</div>
+                    <button class="copy-btn" onclick="copyServiceEmail()" id="copyEmailBtn">Copy</button>
+                  </div>
+                  <div id="noEmailWarning" style="display:none;" class="warning-box">
+                    You did not enter your service account email in Step 2. Please go back and paste it there first.
+                  </div>
+                  <div class="step-card-body" style="margin-top:14px;">
+                    <b>4.</b> Set permission to <span class="highlight">Make changes to events</span>.<br>
+                    <b>5.</b> Click <span class="highlight">Send</span>.
+                  </div>
+                  <div class="warning-box">
+                    <b>&#9888; "Make changes" is greyed out?</b> This can happen on school or work Google accounts.
+                    Contact your IT admin, or use a personal Gmail calendar instead.
+                  </div>
+                </div>
+                <div style="text-align:right;margin-top:8px;">
+                  <button class="step-done-btn" onclick="markStepDone(4)">Done sharing — Next →</button>
+                </div>
+              </div>
+
+              <!-- STEP 5 -->
+              <div class="cwiz-panel" id="cwp-5">
+                <div class="step-card">
+                  <div class="step-card-num">Final step</div>
+                  <div class="step-card-title">Paste your JSON file and connect</div>
+                  <div class="step-card-body">
+                    Open the JSON file from Step 2 with <b>Notepad</b> or <b>TextEdit</b>.
+                    Select all (<span class="highlight">Ctrl+A</span> / <span class="highlight">Cmd+A</span>), copy, and
+                    paste below.
+                  </div>
+                  <div class="json-paste-wrap" style="margin-top:14px;">
+                    <textarea id="serviceAccountJson"
+                      placeholder='Paste the full contents of your .json file here — it starts with { "type": "service_account" ...'
+                      oninput="onJsonInput()"></textarea>
+                    <div class="json-valid-tag" id="jsonValidTag" style="display:none;"></div>
+                  </div>
+                  <div id="jsonParseError" style="display:none;" class="warning-box">
+                    This does not look like a valid JSON file. Make sure you copied the entire contents of the file —
+                    from the opening { to the closing }.
+                  </div>
+                  <div id="connectSummary" style="margin-top:16px;display:none;">
+                    <div
+                      style="font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;">
+                      Ready to connect</div>
+                    <ul class="checklist">
+                      <li><span class="ci">&#128198;</span>
+                        <div><b>Calendar:</b> <span id="summaryCalId"
+                            style="font-family:var(--font-mono);font-size:12px;color:var(--accent);">—</span></div>
+                      </li>
+                      <li><span class="ci">&#128273;</span>
+                        <div><b>Service account:</b> <span id="summaryEmail"
+                            style="font-family:var(--font-mono);font-size:12px;color:var(--accent);">—</span></div>
+                      </li>
+                      <li><span class="ci">&#128196;</span>
+                        <div><b>JSON key:</b> <span id="summaryJsonStatus" style="color:var(--success);">Valid ✓</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="step-action-row" style="justify-content:space-between;">
+                  <button class="btn btn-ghost" onclick="goWizStep(1)" style="font-size:12px;">← Start over</button>
+                  <button class="btn btn-primary" id="connectFinalBtn" onclick="connectCalendar()" disabled
+                    style="opacity:.5;">🔗 Connect Calendar</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div><!-- content-area -->
+    </div><!-- main-content -->
+  </div><!-- layout -->
+
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
+  <script>
+    let adminToken = null;
+    let adminSession = {};
+    let cfgHasUnsavedChanges = false;
+    let currentSimMode = 'book';
+
+    // ── Dynamic name helpers ──────────────────────────────────────────────────────
+    function getDynBotName() { return document.getElementById('cfg_bot_name').value.trim() || 'your clinic'; }
+    function getDynRecepName() { return document.getElementById('cfg_receptionist_name').value.trim() || 'your assistant'; }
+
+    function refreshDynamicNames() {
+      const bn = getDynBotName();
+      const rn = getDynRecepName();
+      const el = (id) => { const e = document.getElementById(id); if (e) e.textContent = rn; };
+      el('cfgTabBotName');
+      el('hintBotName');
+      el('previewBotLabel');
+      document.querySelectorAll('.dynamic-bot-name').forEach(e => e.textContent = rn);
+      const cfgHeader = document.getElementById('cfgHeaderBotName');
+      if (cfgHeader) cfgHeader.textContent = bn || 'your assistant';
+      // Update voice samples with dynamic names
+      updateVoiceSamples(rn, bn);
+      refreshSim();
+      updatePromptPreview(getCurrentCfg());
+    }
+
+    function updateVoiceSamples(rn, bn) {
+      const lang = document.getElementById('cfg_language_code')?.value || 'gu-IN';
+      const samples = {
+        'gu-IN': {
+          simran: `"${bn} માં આપનું સ્વાગત છે. હું ${rn}, આપની appointment..."`,
+          ritu: `"${bn}. ${rn} બોલે છે. Appointment માટે..."`,
+          amit: `"${bn} — ${rn} speaking. આ appointment booking..."`
+        },
+        'hi-IN': {
+          simran: `"${bn} में आपका स्वागत है। मैं ${rn} हूँ..."`,
+          ritu: `"${bn}। ${rn} बोल रही हूँ। Appointment के लिए..."`,
+          amit: `"${bn} — ${rn} speaking. Appointment booking..."`
+        },
+        'en-IN': {
+          simran: `"Welcome to ${bn}. I'm ${rn}, your assistant..."`,
+          ritu: `"${bn}. This is ${rn}. How may I help..."`,
+          amit: `"${bn} — ${rn} speaking. How can I assist..."`
+        }
+      };
+      const s = samples[lang] || samples['gu-IN'];
+      ['simran', 'ritu', 'amit'].forEach(v => {
+        const el = document.getElementById(v + '-sample');
+        if (el && s[v]) el.textContent = s[v];
+      });
+    }
+
+    // ── Toast ─────────────────────────────────────────────────────────────────────
+    function showToast(msg, type = '') {
+      const t = document.createElement('div');
+      t.className = 'toast' + (type ? ' ' + type : '');
+      t.textContent = msg;
+      document.getElementById('toastContainer').appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }
+
+    // ── Admin login ───────────────────────────────────────────────────────────────
+    async function doAdminLogin() {
+      const email = document.getElementById('adminEmail').value.trim();
+      const pass = document.getElementById('adminPassword').value;
+      if (!email || !pass) { showToast('Email and password required', 'error'); return; }
+      const btn = document.getElementById('adminLoginBtn');
+      btn.disabled = true; btn.textContent = 'Logging in…';
+      try {
+        const r = await fetch('/admin/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: pass })
+        });
+        if (!r.ok) { const e = await r.json().catch(() => { }); throw new Error(e?.detail || 'Login failed'); }
+        const data = await r.json();
+        adminToken = data.token;
+        adminSession = data;
+        localStorage.setItem('admin_token', adminToken);
+        localStorage.setItem('admin_session', JSON.stringify(data));
+        enterDashboard(data);
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = '→  Enter Dashboard';
+      }
+    }
+    function doAdminLogout() {
+      fetch('/admin/logout', { headers: { 'X-Admin-Token': adminToken } }).catch(() => { });
+      adminToken = null; adminSession = {};
+      localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
+      document.getElementById('adminLogin').classList.remove('hidden');
+      document.getElementById('adminApp').style.display = 'none';
+    }
+    function enterDashboard(session) {
+      document.getElementById('adminLogin').classList.add('hidden');
+      document.getElementById('adminApp').style.display = 'flex';
+      document.getElementById('adminEmailDisplay').textContent = session.email || '—';
+      document.getElementById('businessNameDisplay').textContent = session.business_name || '';
+      loadStats(); loadToday(); loadBotConfig(); checkCalendarStatus();
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('todayDatePicker').value = today;
+      const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      document.getElementById('fromDate').value = lastWeek;
+      document.getElementById('toDate').value = today;
+    }
+    async function checkStoredLogin() {
+      const token = localStorage.getItem('admin_token');
+      const sess = localStorage.getItem('admin_session');
+      if (!token || !sess) return;
+      try {
+        const r = await fetch('/admin/stats', { headers: { 'X-Admin-Token': token } });
+        if (!r.ok) throw new Error('expired');
+        adminToken = token;
+        adminSession = JSON.parse(sess);
+        enterDashboard(adminSession);
+      } catch (e) {
+        localStorage.removeItem('admin_token'); localStorage.removeItem('admin_session');
+      }
+    }
+
+    // ── Tab navigation ────────────────────────────────────────────────────────────
+    const tabTitles = {
+      dashboard: 'Dashboard', today: "Today's Schedule",
+      appointments: 'All Appointments', customers: 'Customers',
+      botconfig: 'Bot Configuration', calendar: 'Calendar Connect'
+    };
+    function switchTab(name) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(n => {
+        if (n.textContent.trim().toLowerCase().includes(name === 'today' ? "today" : name === 'botconfig' ? 'bot' : name === 'calendar' ? 'calendar' : name))
+          n.classList.add('active');
+      });
+      document.getElementById('topBarTitle').textContent = tabTitles[name] || name;
+      document.getElementById('unsavedIndicator').style.display = (name === 'botconfig' && cfgHasUnsavedChanges) ? 'inline' : 'none';
+      if (name === 'customers') loadCustomers();
+      if (name === 'today') loadAppointmentsForDate();
+      if (name === 'botconfig') { refreshDynamicNames(); updateHoursVisual(); }
+    }
+
+    // ── Config inner tabs ─────────────────────────────────────────────────────────
+    function switchConfigTab(name, el) {
+      document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('cpanel-' + name).classList.add('active');
+      el.classList.add('active');
+      if (name === 'preview') { refreshSim(); updatePromptPreview(getCurrentCfg()); }
+    }
+
+    // ── Voice & language selectors ────────────────────────────────────────────────
+    function selectVoice(v) {
+      document.querySelectorAll('.voice-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('vc-' + v).classList.add('selected');
+      document.getElementById('cfg_tts_speaker').value = v;
+      onCfgChange();
+      refreshDynamicNames();
+    }
+    function selectLang(l) {
+      document.querySelectorAll('.lang-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('lc-' + l).classList.add('selected');
+      document.getElementById('cfg_language_code').value = l;
+      onCfgChange();
+      refreshDynamicNames();
+    }
+
+    // ── Hours visual ──────────────────────────────────────────────────────────────
+    function updateHoursVisual() {
+      const start = parseInt(document.getElementById('cfg_business_hours_start').value) || 9;
+      const end = parseInt(document.getElementById('cfg_business_hours_end').value) || 18;
+      const left = (start / 24) * 100;
+      const width = Math.max(0, ((end - start) / 24) * 100);
+      const fill = document.getElementById('hoursBarFill');
+      if (fill) { fill.style.left = left + '%'; fill.style.width = width + '%'; }
+      const fmt = h => { const ampm = h < 12 ? 'AM' : 'PM'; const hh = h % 12 || 12; return hh + ':00 ' + ampm; };
+      const ro = document.getElementById('hoursReadout');
+      if (ro) ro.textContent = fmt(start) + ' — ' + fmt(end);
+    }
+
+    // ── Context pills ─────────────────────────────────────────────────────────────
+    function togglePill(el) {
+      const isOn = el.classList.toggle('on');
+      const txt = el.dataset.text || '';
+      const ta = document.getElementById('cfg_extra_prompt_context');
+      if (isOn) {
+        ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + txt;
+      } else {
+        ta.value = ta.value.replace(' ' + txt, '').replace(txt, '').trim();
+      }
+      updateWordCount();
+      onCfgChange();
+    }
+    function updateWordCount() {
+      const v = document.getElementById('cfg_extra_prompt_context').value.trim();
+      const w = v ? v.split(/\s+/).filter(Boolean).length : 0;
+      const el = document.getElementById('ctxWordCount');
+      if (el) el.textContent = w + ' word' + (w !== 1 ? 's' : '');
+    }
+
+    // ── Unsaved change tracking ───────────────────────────────────────────────────
+    function onCfgChange() {
+      cfgHasUnsavedChanges = true;
+      document.getElementById('unsavedIndicator').style.display = 'inline';
+      document.getElementById('saveStatusMsg').textContent = 'Unsaved changes';
+      refreshDynamicNames();
+    }
+
+    // ── API helpers ───────────────────────────────────────────────────────────────
+    async function apiFetch(path, options = {}) {
+      const r = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken, ...(options.headers || {}) } });
+      if (!r.ok) { const e = await r.json().catch(() => { }); throw new Error(e?.detail || `API error ${r.status}`); }
+      return r.json();
+    }
+
+    // ── Stats ─────────────────────────────────────────────────────────────────────
+    async function loadStats() {
+      try {
+        const stats = await apiFetch('/admin/stats');
+        document.getElementById('st-upcoming').textContent = stats.upcoming ?? '—';
+        document.getElementById('st-today').textContent = stats.today_total ?? '—';
+        document.getElementById('st-30d').textContent = stats.booked_30d ?? '—';
+        document.getElementById('st-cancel').textContent = stats.cancelled_30d ?? '—';
+        document.getElementById('st-customers').textContent = stats.unique_customers ?? '—';
+      } catch (e) { showToast('Could not load stats', 'error'); }
+    }
+
+    // ── Today / schedule ──────────────────────────────────────────────────────────
+    async function loadToday() {
+      try {
+        const appts = await apiFetch('/admin/appointments/today');
+        renderApptTable(appts, 'dashTodayBody');
+      } catch (e) { showToast("Could not load today's schedule", 'error'); }
+    }
+    async function loadAppointmentsForDate() {
+      const date = document.getElementById('todayDatePicker').value;
+      if (!date) return;
+      document.getElementById('todayTableTitle').textContent = 'Appointments — ' + date;
+      try {
+        const appts = await apiFetch(`/admin/appointments?appt_date=${date}`);
+        renderApptTable(appts, 'todayTableBody');
+      } catch (e) { showToast('Could not load appointments', 'error'); }
+    }
+    async function loadAppointmentRange() {
+      const from = document.getElementById('fromDate').value;
+      const to = document.getElementById('toDate').value;
+      if (!from || !to) { showToast('Select both dates', 'error'); return; }
+      try {
+        const appts = await apiFetch(`/admin/appointments?from_date=${from}T00:00:00&to_date=${to}T23:59:59`);
+        renderApptTable(appts, 'allApptBody');
+      } catch (e) { showToast('Could not load appointments', 'error'); }
+    }
+    function renderApptTable(appts, containerId) {
+      const el = document.getElementById(containerId);
+      if (!appts || appts.length === 0) {
+        el.innerHTML = '<div class="empty-state"><span>📭</span>No appointments found.</div>'; return;
+      }
+      el.innerHTML = `<table class="appt-table">
     <thead><tr><th>Time</th><th>Customer</th><th>Phone</th><th>Status</th></tr></thead>
     <tbody>${appts.map(a => {
-      const dt = new Date(a.start_time);
-      const timeStr = dt.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
-      const dateStr = dt.toLocaleDateString('en-IN', {day:'numeric',month:'short'});
-      const cls = (a.status||'BOOKED').toLowerCase();
-      return `<tr>
+        const dt = new Date(a.start_time);
+        const timeStr = dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const dateStr = dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        const cls = (a.status || 'BOOKED').toLowerCase();
+        return `<tr>
         <td><b>${timeStr}</b><br><span style="font-size:11px;color:var(--muted)">${dateStr}</span></td>
         <td>${a.customer_name || '—'}</td>
         <td style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">${a.phone_number}</td>
-        <td><span class="tag ${cls}">${a.status||'BOOKED'}</span></td>
+        <td><span class="tag ${cls}">${a.status || 'BOOKED'}</span></td>
       </tr>`;
-    }).join('')}</tbody>
+      }).join('')}</tbody>
   </table>`;
-}
-
-// ── Customers ─────────────────────────────────────────────────────────────────
-async function loadCustomers() {
-  try {
-    const users = await apiFetch('/admin/users');
-    const el = document.getElementById('customersBody');
-    if (!users || users.length === 0) {
-      el.innerHTML = '<div class="empty-state"><span>👥</span>No customers yet.</div>'; return;
     }
-    el.innerHTML = `
+
+    // ── Customers ─────────────────────────────────────────────────────────────────
+    async function loadCustomers() {
+      try {
+        const users = await apiFetch('/admin/users');
+        const el = document.getElementById('customersBody');
+        if (!users || users.length === 0) {
+          el.innerHTML = '<div class="empty-state"><span>👥</span>No customers yet.</div>'; return;
+        }
+        el.innerHTML = `
       <div style="font-size:12px;color:var(--muted);padding:8px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr auto;gap:12px;">
         <span>NAME</span><span>PHONE</span><span>APPTS</span>
       </div>
@@ -599,98 +2722,317 @@ async function loadCustomers() {
         <div class="user-phone">${u.phone_number}</div>
         <div class="user-appt-count">${u.appointment_count || 0} appts</div>
       </div>`).join('')}`;
-  } catch(e) { showToast('Could not load customers', 'error'); }
-}
+      } catch (e) { showToast('Could not load customers', 'error'); }
+    }
 
-// ── Bot config ────────────────────────────────────────────────────────────────
-async function loadBotConfig() {
-  try {
-    const cfg = await apiFetch('/admin/bot-config');
-    if (!cfg || !cfg.config_id) return;
-    document.getElementById('cfg_bot_name').value = cfg.bot_name || '';
-    document.getElementById('cfg_receptionist_name').value = cfg.receptionist_name || '';
-    document.getElementById('cfg_business_description').value = cfg.business_description || '';
-    document.getElementById('cfg_greeting_message').value = cfg.greeting_message || '';
-    document.getElementById('cfg_language_code').value = cfg.language_code || 'gu-IN';
-    document.getElementById('cfg_tts_speaker').value = cfg.tts_speaker || 'simran';
-    document.getElementById('cfg_business_hours_start').value = cfg.business_hours_start ?? 9;
-    document.getElementById('cfg_business_hours_end').value = cfg.business_hours_end ?? 18;
-    document.getElementById('cfg_slot_duration_mins').value = cfg.slot_duration_mins || 30;
-    document.getElementById('cfg_silence_timeout_ms').value = cfg.silence_timeout_ms || 1500;
-    document.getElementById('cfg_extra_prompt_context').value = cfg.extra_prompt_context || '';
-    updatePromptPreview(cfg);
-  } catch(e) {}
-}
-async function saveBotConfig() {
-  const body = {
-    bot_name: document.getElementById('cfg_bot_name').value,
-    receptionist_name: document.getElementById('cfg_receptionist_name').value,
-    business_description: document.getElementById('cfg_business_description').value,
-    greeting_message: document.getElementById('cfg_greeting_message').value,
-    language_code: document.getElementById('cfg_language_code').value,
-    tts_speaker: document.getElementById('cfg_tts_speaker').value,
-    business_hours_start: parseInt(document.getElementById('cfg_business_hours_start').value) || 9,
-    business_hours_end: parseInt(document.getElementById('cfg_business_hours_end').value) || 18,
-    slot_duration_mins: parseInt(document.getElementById('cfg_slot_duration_mins').value) || 30,
-    silence_timeout_ms: parseInt(document.getElementById('cfg_silence_timeout_ms').value) || 1500,
-    extra_prompt_context: document.getElementById('cfg_extra_prompt_context').value,
-  };
-  try {
-    const cfg = await apiFetch('/admin/bot-config', { method: 'POST', body: JSON.stringify(body) });
-    showToast('Configuration saved ✓', 'success');
-    updatePromptPreview(body);
-  } catch(e) { showToast('Save failed: ' + e.message, 'error'); }
-}
-function updatePromptPreview(cfg) {
-  const today = new Date().toISOString().split('T')[0];
-  const day   = new Date().toLocaleDateString('en-US', {weekday:'long'});
-  const preview = `You are ${cfg.receptionist_name || 'Priya'}, AI receptionist at ${cfg.bot_name || 'SamaySetu AI'} — ${cfg.business_description || 'a professional appointment booking service'}.
+    // ── Bot config ────────────────────────────────────────────────────────────────
+    function getCurrentCfg() {
+      return {
+        bot_name: document.getElementById('cfg_bot_name').value,
+        receptionist_name: document.getElementById('cfg_receptionist_name').value,
+        business_description: document.getElementById('cfg_business_description').value,
+        greeting_message: document.getElementById('cfg_greeting_message').value,
+        language_code: document.getElementById('cfg_language_code').value,
+        tts_speaker: document.getElementById('cfg_tts_speaker').value,
+        business_hours_start: parseInt(document.getElementById('cfg_business_hours_start').value) || 9,
+        business_hours_end: parseInt(document.getElementById('cfg_business_hours_end').value) || 18,
+        slot_duration_mins: parseInt(document.getElementById('cfg_slot_duration_mins').value) || 30,
+        silence_timeout_ms: parseInt(document.getElementById('cfg_silence_timeout_ms').value) || 1500,
+        extra_prompt_context: document.getElementById('cfg_extra_prompt_context').value,
+      };
+    }
+    async function loadBotConfig() {
+      try {
+        const cfg = await apiFetch('/admin/bot-config');
+        if (!cfg || !cfg.config_id) return;
+        document.getElementById('cfg_bot_name').value = cfg.bot_name || '';
+        document.getElementById('cfg_receptionist_name').value = cfg.receptionist_name || '';
+        document.getElementById('cfg_business_description').value = cfg.business_description || '';
+        document.getElementById('cfg_greeting_message').value = cfg.greeting_message || '';
+        document.getElementById('cfg_language_code').value = cfg.language_code || 'gu-IN';
+        document.getElementById('cfg_tts_speaker').value = cfg.tts_speaker || 'simran';
+        document.getElementById('cfg_business_hours_start').value = cfg.business_hours_start ?? 9;
+        document.getElementById('cfg_business_hours_end').value = cfg.business_hours_end ?? 18;
+        document.getElementById('cfg_slot_duration_mins').value = cfg.slot_duration_mins || 30;
+        document.getElementById('cfg_silence_timeout_ms').value = cfg.silence_timeout_ms || 1500;
+        document.getElementById('cfg_extra_prompt_context').value = cfg.extra_prompt_context || '';
+        // Sync visual selectors
+        selectVoiceUI(cfg.tts_speaker || 'simran');
+        selectLangUI(cfg.language_code || 'gu-IN');
+        updateHoursVisual();
+        updateWordCount();
+        refreshDynamicNames();
+        updatePromptPreview(cfg);
+        cfgHasUnsavedChanges = false;
+        document.getElementById('unsavedIndicator').style.display = 'none';
+        document.getElementById('saveStatusMsg').textContent = '';
+      } catch (e) { }
+    }
+    function selectVoiceUI(v) {
+      document.querySelectorAll('.voice-card').forEach(c => c.classList.remove('selected'));
+      const el = document.getElementById('vc-' + v);
+      if (el) el.classList.add('selected');
+    }
+    function selectLangUI(l) {
+      document.querySelectorAll('.lang-card').forEach(c => c.classList.remove('selected'));
+      const el = document.getElementById('lc-' + l);
+      if (el) el.classList.add('selected');
+    }
+    async function saveBotConfig() {
+      const body = getCurrentCfg();
+      try {
+        await apiFetch('/admin/bot-config', { method: 'POST', body: JSON.stringify(body) });
+        showToast('Configuration saved ✓', 'success');
+        updatePromptPreview(body);
+        cfgHasUnsavedChanges = false;
+        document.getElementById('unsavedIndicator').style.display = 'none';
+        document.getElementById('saveStatusMsg').textContent = 'Saved';
+        setTimeout(() => { document.getElementById('saveStatusMsg').textContent = ''; }, 3000);
+      } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+    }
+    function updatePromptPreview(cfg) {
+      const today = new Date().toISOString().split('T')[0];
+      const day = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+      const rn = cfg.receptionist_name || 'Priya';
+      const bn = cfg.bot_name || 'SamaySetu AI';
+      const preview = `You are ${rn}, AI receptionist at ${bn} — ${cfg.business_description || 'a professional appointment booking service'}.
 Today: ${today} (${day}). All times in IST.
 Business hours: ${cfg.business_hours_start ?? 9}:00 to ${cfg.business_hours_end ?? 18}:00. Default slot: ${cfg.slot_duration_mins || 30} minutes.
 ${cfg.greeting_message ? 'Greeting: ' + cfg.greeting_message : ''}
-${cfg.extra_prompt_context ? 'Extra context: ' + cfg.extra_prompt_context : ''}
-[... rest of standard booking rules appended automatically ...]`;
-  document.getElementById('promptPreview').textContent = preview.trim();
-}
-
-// ── Calendar ──────────────────────────────────────────────────────────────────
-async function checkCalendarStatus() {
-  try {
-    const s = await apiFetch('/admin/calendar/status');
-    const dot = document.getElementById('calDot');
-    const txt = document.getElementById('calStatusText');
-    const sub = document.getElementById('calStatusSub');
-    if (s.connected) {
-      dot.className = 'cal-dot connected';
-      txt.textContent = 'Connected';
-      sub.textContent = `Calendar: ${s.calendar_id} · Connected ${new Date(s.connected_at).toLocaleDateString()}`;
-      if (s.calendar_id) document.getElementById('calendarId').value = s.calendar_id;
-    } else {
-      dot.className = 'cal-dot disconnected';
-      txt.textContent = 'Not connected';
-      sub.textContent = '';
+${cfg.extra_prompt_context ? 'Additional context: ' + cfg.extra_prompt_context : ''}
+[... booking rules, memory state, tool definitions appended automatically ...]`;
+      const el = document.getElementById('promptPreview');
+      if (el) el.textContent = preview.trim();
     }
-  } catch(e) {}
-}
-async function connectCalendar() {
-  const calId = document.getElementById('calendarId').value.trim();
-  const json  = document.getElementById('serviceAccountJson').value.trim();
-  if (!calId || !json) { showToast('Both Calendar ID and Service Account JSON are required', 'error'); return; }
-  try {
-    JSON.parse(json);
-  } catch(e) { showToast('Invalid JSON format', 'error'); return; }
-  try {
-    await apiFetch('/admin/calendar/connect', {
-      method: 'POST',
-      body: JSON.stringify({ calendar_id: calId, service_account_json: json })
-    });
-    showToast('Calendar connected ✓', 'success');
-    checkCalendarStatus();
-  } catch(e) { showToast('Connection failed: ' + e.message, 'error'); }
-}
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-checkStoredLogin();
-</script>
+    // ── Live simulation ───────────────────────────────────────────────────────────
+    function refreshSim() { renderSim(currentSimMode); }
+    function switchSim(mode, btn) {
+      currentSimMode = mode;
+      document.querySelectorAll('.preview-seg button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      renderSim(mode);
+    }
+    function renderSim(mode) {
+      const rn = getDynRecepName();
+      const bn = getDynBotName();
+      const hasPark = !!document.querySelector('.ctx-pill[data-text*="parking"]')?.classList.contains('on');
+      const hasHindi = !!document.querySelector('.ctx-pill[data-text*="Hindi"]')?.classList.contains('on');
+      const slots = document.getElementById('cfg_slot_duration_mins')?.value || '30';
+
+      const scripts = {
+        book: [
+          { who: 'patient', text: 'Hello, I need to book an appointment for tomorrow at 2 PM.' },
+          { who: 'bot', text: `Of course! Shall I book an appointment at ${bn} tomorrow at 2 PM? Please confirm and I'll lock it in.`, good: true },
+          { who: 'patient', text: 'Yes, please confirm.' },
+          { who: 'bot', text: `Your appointment is confirmed for tomorrow at 2 PM at ${bn}. We'll see you then!`, good: true }
+        ],
+        faq: [
+          { who: 'patient', text: 'Does the doctor speak Hindi?' },
+          {
+            who: 'bot',
+            text: hasHindi
+              ? `Yes! The doctor speaks both Gujarati and Hindi — feel free to speak in whichever is comfortable for you.`
+              : `I don't have that information right now. I'd suggest calling the clinic directly to confirm.`,
+            good: hasHindi, weak: !hasHindi
+          },
+          { who: 'patient', text: 'Is parking available?' },
+          {
+            who: 'bot',
+            text: hasPark
+              ? `Yes, free parking is available right behind the building — very convenient!`
+              : `I'm not sure about parking. Please call the clinic to confirm.`,
+            good: hasPark, weak: !hasPark
+          }
+        ],
+        busy: [
+          { who: 'patient', text: 'I want an appointment at 3 PM tomorrow.' },
+          { who: 'bot', text: `3 PM tomorrow is unfortunately taken. I can offer you 3:45 PM or 4:30 PM — which works better for you?`, good: true },
+          { who: 'patient', text: '3:45 works.' },
+          { who: 'bot', text: `Shall I confirm your appointment at ${bn} for tomorrow at 3:45 PM?`, good: true }
+        ]
+      };
+      const msgs = scripts[mode] || scripts.book;
+      const initials = rn.charAt(0).toUpperCase();
+      let html = '';
+      msgs.forEach(m => {
+        const isBot = m.who === 'bot';
+        const cls = isBot ? (m.weak ? 'weak' : m.good ? 'good' : '') : '';
+        html += `<div class="sim-msg">
+      <div class="sim-av ${isBot ? 'bot' : 'patient'}">${isBot ? initials : 'P'}</div>
+      <div class="sim-bubble"><span class="${cls}">${m.text}</span></div>
+    </div>`;
+      });
+      const el = document.getElementById('simOutput');
+      if (el) el.innerHTML = html;
+      // update caption
+      const lbl = document.getElementById('previewBotLabel');
+      if (lbl) lbl.textContent = rn + ' (' + bn + ')';
+    }
+
+    // ── Calendar Wizard ───────────────────────────────────────────────────────────
+    let wizCurrentStep = 1;
+    const WIZ_TOTAL = 5;
+
+    function goWizStep(n) {
+      if (n < 1 || n > WIZ_TOTAL) return;
+      document.querySelectorAll('.cwiz-panel').forEach(p => p.classList.remove('active'));
+      const panel = document.getElementById('cwp-' + n);
+      if (panel) panel.classList.add('active');
+
+      for (let i = 1; i <= WIZ_TOTAL; i++) {
+        const circle = document.getElementById('wc' + i);
+        const label = document.getElementById('wl' + i);
+        if (!circle) continue;
+        circle.classList.remove('active', 'done');
+        label.classList.remove('active', 'done');
+        if (i < n) { circle.classList.add('done'); label.classList.add('done'); circle.textContent = '✓'; }
+        else if (i === n) { circle.classList.add('active'); label.classList.add('active'); circle.textContent = i; }
+        else { circle.textContent = i; }
+      }
+      for (let i = 1; i < WIZ_TOTAL; i++) {
+        const conn = document.getElementById('wconn' + i);
+        if (conn) conn.classList.toggle('done', i < n);
+      }
+      const pct = Math.round(((n - 1) / (WIZ_TOTAL - 1)) * 100);
+      const bar = document.getElementById('wizProgressBar');
+      if (bar) bar.style.width = pct + '%';
+
+      wizCurrentStep = n;
+
+      if (n === 4) refreshStep4Email();
+      if (n === 5) refreshConnectSummary();
+    }
+
+    function markStepDone(step) { goWizStep(step + 1); }
+
+    function onServiceEmailInput() {
+      const v = document.getElementById('serviceAccountEmail').value.trim();
+      const note = document.getElementById('emailSavedNote');
+      if (v && v.includes('@')) { note.style.display = 'block'; }
+      else { note.style.display = 'none'; }
+    }
+
+    function onCalIdInput() {
+      const v = document.getElementById('calendarId').value.trim();
+      const note = document.getElementById('calIdNote');
+      if (v) { note.style.display = 'block'; }
+      else { note.style.display = 'none'; }
+      refreshConnectSummary();
+    }
+
+    function refreshStep4Email() {
+      const email = document.getElementById('serviceAccountEmail')?.value.trim() || '';
+      const display = document.getElementById('saEmailDisplay');
+      const warning = document.getElementById('noEmailWarning');
+      if (display) display.textContent = email || '—';
+      if (warning) warning.style.display = email ? 'none' : 'block';
+    }
+
+    function copyServiceEmail() {
+      const email = document.getElementById('serviceAccountEmail')?.value.trim() || '';
+      if (!email) { showToast('No email entered — go back to Step 2 first', 'error'); return; }
+      navigator.clipboard.writeText(email).then(() => {
+        const btn = document.getElementById('copyEmailBtn');
+        if (btn) { btn.textContent = 'Copied!'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000); }
+      }).catch(() => { showToast('Could not copy — please copy manually', 'error'); });
+    }
+
+    function onJsonInput() {
+      const raw = document.getElementById('serviceAccountJson').value.trim();
+      const tag = document.getElementById('jsonValidTag');
+      const err = document.getElementById('jsonParseError');
+      const btn = document.getElementById('connectFinalBtn');
+      if (!raw) {
+        tag.style.display = 'none';
+        err.style.display = 'none';
+        btn.disabled = true; btn.style.opacity = '.5';
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        const isServiceAccount = parsed.type === 'service_account';
+        tag.style.display = 'block';
+        tag.className = 'json-valid-tag ' + (isServiceAccount ? 'ok' : 'err');
+        tag.textContent = isServiceAccount ? 'Valid JSON ✓' : 'Wrong type';
+        err.style.display = isServiceAccount ? 'none' : 'block';
+        const calId = document.getElementById('calendarId').value.trim();
+        btn.disabled = !(isServiceAccount && calId);
+        btn.style.opacity = (isServiceAccount && calId) ? '1' : '.5';
+      } catch (e) {
+        tag.style.display = 'block';
+        tag.className = 'json-valid-tag err';
+        tag.textContent = 'Invalid JSON';
+        err.style.display = 'block';
+        btn.disabled = true; btn.style.opacity = '.5';
+      }
+      refreshConnectSummary();
+    }
+
+    function refreshConnectSummary() {
+      const calId = document.getElementById('calendarId')?.value.trim() || '';
+      const email = document.getElementById('serviceAccountEmail')?.value.trim() || '';
+      const raw = document.getElementById('serviceAccountJson')?.value.trim() || '';
+      let jsonOk = false;
+      try { const p = JSON.parse(raw); jsonOk = p.type === 'service_account'; } catch (e) { }
+
+      const summary = document.getElementById('connectSummary');
+      if (!summary) return;
+      summary.style.display = (calId || email || jsonOk) ? 'block' : 'none';
+      const sc = document.getElementById('summaryCalId');
+      const se = document.getElementById('summaryEmail');
+      const sj = document.getElementById('summaryJsonStatus');
+      if (sc) sc.textContent = calId || '—';
+      if (se) se.textContent = email || '—';
+      if (sj) { sj.textContent = jsonOk ? 'Valid ✓' : 'Not pasted yet'; sj.style.color = jsonOk ? 'var(--success)' : 'var(--muted)'; }
+    }
+
+    async function checkCalendarStatus() {
+      try {
+        const s = await apiFetch('/admin/calendar/status');
+        if (s.connected) {
+          document.getElementById('cal-connected-banner').style.display = 'block';
+          document.getElementById('cal-wizard-wrap').style.display = 'none';
+          const sub = document.getElementById('cal-banner-sub');
+          if (sub) sub.textContent = `Calendar: ${s.calendar_id} · Connected ${new Date(s.connected_at).toLocaleDateString()}`;
+          if (s.calendar_id) { const el = document.getElementById('calendarId'); if (el) el.value = s.calendar_id; }
+        } else {
+          document.getElementById('cal-connected-banner').style.display = 'none';
+          document.getElementById('cal-wizard-wrap').style.display = 'block';
+        }
+      } catch (e) { }
+    }
+
+    function showReconnectWizard() {
+      document.getElementById('cal-connected-banner').style.display = 'none';
+      document.getElementById('cal-wizard-wrap').style.display = 'block';
+      goWizStep(1);
+    }
+
+    async function connectCalendar() {
+      const calId = document.getElementById('calendarId').value.trim();
+      const json = document.getElementById('serviceAccountJson').value.trim();
+      if (!calId || !json) { showToast('Calendar ID and JSON are both required', 'error'); return; }
+      try { JSON.parse(json); } catch (e) { showToast('Invalid JSON format', 'error'); return; }
+      const btn = document.getElementById('connectFinalBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+      try {
+        await apiFetch('/admin/calendar/connect', {
+          method: 'POST',
+          body: JSON.stringify({ calendar_id: calId, service_account_json: json })
+        });
+        showToast('Calendar connected successfully ✓', 'success');
+        checkCalendarStatus();
+      } catch (e) {
+        showToast('Connection failed: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '🔗 Connect Calendar'; btn.style.opacity = '1'; }
+      }
+    }
+
+    // ── Init ────────────────────────────────────────────────────────────────────────────────────
+    checkStoredLogin();
+    goWizStep(1);
+  </script>
 </body>
+
 </html>
