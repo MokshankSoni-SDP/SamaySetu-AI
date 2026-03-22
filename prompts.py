@@ -1,12 +1,66 @@
 # prompts.py  — multi-tenant, modular prompt generation
 
+LANG_PACK = {
+    "gu-IN": {
+        "language_name": "Gujarati",
+        "confirmation_example": "શું હું ૨૦ માર્ચે બપોરે 12 વાગ્યે એપોઇન્ટમેન્ટ મૂકી દઉં?",
+        "unclear_msg": "માફ કરશો, સ્પષ્ટ ન સમજ્યો. ફરી કહેશો?",
+        "yes_words": ["હા", "ઓકે", "કરી દો"],
+        "today_word": "આજે",
+        "tomorrow_word": "કાલે",
+        "day_after_tomorrow_word": "પરમ",
+    },
+    "hi-IN": {
+        "language_name": "Hindi",
+        "confirmation_example": "क्या मैं 20 मार्च को दोपहर 12 बजे अपॉइंटमेंट बुक कर दूं?",
+        "unclear_msg": "माफ़ कीजिए, मैं समझ नहीं पाया। कृपया फिर से कहिए।",
+        "yes_words": ["हाँ", "ठीक है", "कर दीजिए"],
+        "today_word": "आज",
+        "tomorrow_word": "कल",
+        "day_after_tomorrow_word": "परसों",
+    },
+    "en-IN": {
+        "language_name": "English",
+        "confirmation_example": "Should I book the appointment for 20th March at 12 PM?",
+        "unclear_msg": "Sorry, I didn’t understand that. Could you please repeat?",
+        "yes_words": ["yes", "okay", "confirm"],
+        "today_word": "today",
+        "tomorrow_word": "tomorrow",
+        "day_after_tomorrow_word": "day after tomorrow",
+    }
+}
+
+MEMORY_LANG_PACK = {
+    "gu-IN": {
+        "time_example": "1 વાગ્યે ચાલશે",
+        "date_example": "કાલે",
+        "date_correction": "ના, આજે",
+        "selection_example": "1 વાગ્યા વાળો ચાલશે",
+        "yes_words": ["હા", "ઓકે", "કરી દો"],
+    },
+    "hi-IN": {
+        "time_example": "1 बजे ठीक है",
+        "date_example": "कल",
+        "date_correction": "नहीं, आज",
+        "selection_example": "1 बजे वाला ठीक है",
+        "yes_words": ["हाँ", "ठीक है", "कर दीजिए"],
+    },
+    "en-IN": {
+        "time_example": "1 PM works",
+        "date_example": "tomorrow",
+        "date_correction": "no, today",
+        "selection_example": "1 PM slot works",
+        "yes_words": ["yes", "okay", "confirm", "go ahead"],
+    }
+}
+
 def get_system_prompt(today_date: str, day: str, config: dict = None) -> str:
     """
     Generates the system prompt for any tenant's bot.
 
     config dict (from bot_configs table) can include:
       bot_name, receptionist_name, business_description,
-      greeting_message, extra_prompt_context,
+      extra_prompt_context,
       business_hours_start, business_hours_end, slot_duration_mins, language_code
     """
     cfg = config or {}
@@ -14,12 +68,16 @@ def get_system_prompt(today_date: str, day: str, config: dict = None) -> str:
     bot_name          = cfg.get("bot_name")           or "SamaySetu AI"
     receptionist_name = cfg.get("receptionist_name")  or "Priya"
     biz_description   = cfg.get("business_description") or "a professional appointment booking service"
-    greeting          = cfg.get("greeting_message")   or ""
     extra_context     = cfg.get("extra_prompt_context") or ""
-    biz_start         = cfg.get("business_hours_start", 9)
-    biz_end           = cfg.get("business_hours_end",  18)
-    slot_mins         = cfg.get("slot_duration_mins",  30)
     lang_code         = cfg.get("language_code",       "gu-IN")
+
+    lang_pack = LANG_PACK.get(lang_code, LANG_PACK["gu-IN"])
+    unclear_msg = lang_pack["unclear_msg"]
+    confirmation_example = lang_pack["confirmation_example"]
+    yes_words_list = ", ".join([f'"{w}"' for w in lang_pack["yes_words"]])
+    today_word = lang_pack["today_word"]
+    tomorrow_word = lang_pack["tomorrow_word"]
+    day_after_tomorrow_word = lang_pack["day_after_tomorrow_word"]
 
     # Derive language instruction
     lang_map = {
@@ -33,7 +91,7 @@ def get_system_prompt(today_date: str, day: str, config: dict = None) -> str:
 
     return f"""You are {receptionist_name}, the AI receptionist at {bot_name} — {biz_description}.
 Today: {today_date} ({day}). All times in IST.
-Business hours: {biz_start}:00 to {biz_end}:00. Default slot: {slot_mins} minutes.{extra_line}
+{extra_line}
 
 === OUTPUT FORMAT ===
 - Always reply in {lang_instruction}.
@@ -43,7 +101,7 @@ Business hours: {biz_start}:00 to {biz_end}:00. Default slot: {slot_mins} minute
 - Never speak ISO strings aloud (e.g. 2026-03-12T13:30:00). Say dates/times naturally.
 
 === DATE INTERPRETATION ===
-- "આજે" / "today" = {today_date}. "કાલે" / "tomorrow" = next day. "પરમ" = day after.
+- "{today_word}" / "today" = {today_date}. "{tomorrow_word}" / "tomorrow" = next day. "{day_after_tomorrow_word}" = day after.
 - Day names = next upcoming occurrence. "13 તારીખ" = current month's 13th (next month if passed).
 - Timings: "1:30", "2 વાગ્યે" implies PM; "9 વાગ્યે" implies AM unless specified.
 
@@ -88,7 +146,7 @@ Use this memory carefully:
 === BOOKING — CRITICAL RULES ===
 1. NO INVENTED SLOTS: Only suggest times a tool returned as FREE.
 2. If slot is 'BUSY', call suggest_next_available_slot and present those options.
-3. GARBLED INPUT: If unclear, ask "માફ કરશો, સ્પષ્ટ ન સમજ્યો. ફરી કહેશો?" — do not call any tools.
+3. GARBLED INPUT: If unclear, ask "{unclear_msg}" — do not call any tools.
 
 === CANCEL / RESCHEDULE ===
 - if time not specified for cancellation or reschedule never assume ask it to user
@@ -103,12 +161,12 @@ STEP 1: If dates and timings are identified:
 → FIRST ask for confirmation
 
 Example:
-"શું હું ૨૦ માર્ચે(specify date) બપોરે 12(specify time) વાગ્યે એપોઇન્ટમેન્ટ મૂકી દઉં?"
+"{confirmation_example}"
 
 STEP 2: WAIT for user confirmation
 
 Only if user says:
-"હા", "ઓકે", "કરી દો", "confirm"
+{yes_words_list}
 
 → THEN AND ONLY THEN call the necessary tool
 
@@ -142,8 +200,15 @@ This is a HARD RULE. No exceptions.
 - Keep replies short and natural — you are a voice assistant."""
 
 
-def get_memory_extraction_prompt():
-    return """
+def get_memory_extraction_prompt(lang_code="gu-IN"):
+    lang_pack = MEMORY_LANG_PACK.get(lang_code, MEMORY_LANG_PACK["gu-IN"])
+    time_example = lang_pack["time_example"]
+    date_example = lang_pack["date_example"]
+    date_correction = lang_pack["date_correction"]
+    selection_example = lang_pack["selection_example"]
+    yes_words_str = ", ".join([f'"{w}"' for w in lang_pack["yes_words"]])
+
+    return f"""
 You are a STATE MANAGER for an appointment booking voice assistant.
 
 Your job is to UPDATE the existing memory state using the new user input.
@@ -164,23 +229,23 @@ Return ONLY updated JSON (no explanation)
 -------------------------------------
 
 MEMORY SCHEMA:
-{
+{{
   "intent": "book | cancel | reschedule | query | none",
-  "appointment": {
+  "appointment": {{
     "date": "YYYY-MM-DD or null",
     "time": "HH:MM or null",
     "duration": "minutes or null"
-  },
-  "reschedule": {
+  }},
+  "reschedule": {{
     "old_time": "YYYY-MM-DDTHH:MM:SS or null",
     "new_time": "YYYY-MM-DDTHH:MM:SS or null"
-  },
-  "date_context": {
+  }},
+  "date_context": {{
     "resolved_date": null,
     "source": "relative | absolute"
-  },
+  }},
   "pending_action": "waiting_for_confirmation | none"
-}
+}}
 
 -------------------------------------
 
@@ -193,7 +258,7 @@ CRITICAL RULES:
 
 Example:
 Memory: date=2026-03-19
-User: "1 વાગ્યે ચાલશે"
+User: "{time_example}"
 → time=13:00, date remains SAME
 
 ---
@@ -208,20 +273,20 @@ User: "1 વાગ્યે ચાલશે"
 - If user changes something → overwrite ONLY that field
 
 Example:
-User: "કાલે"
+User: "{date_example}"
 → date = tomorrow
 
 Then:
-User: "ના, આજે"
+User: "{date_correction}"
 → date = today (overwrite)
 
 ---
 
 ### 4. DATE HANDLING (VERY IMPORTANT)
 Today is provided separately.
-- "આજે" → today
-- "કાલે" → today + 1 day
-- "પરમ" → today + 2 days
+- "આજે"/"आज"/"today" → today
+- "કાલે"/"कल"/"tommorow" → today + 1 day
+- "પરમ"/"परसो"/"day after tommorow" → today + 2 days
 
 NEVER guess wrong year.
 
@@ -230,7 +295,7 @@ NEVER guess wrong year.
 ### 5. CONFIRMATION DETECTION
 -keep the pending_action value = "waiting_for_confirmation" until
  user says something like confirmation as below examples:
-- "હા", "કરી દો", "ઓકે"
+- {yes_words_str}
 → pending_action = "none"
 
 ---
@@ -246,7 +311,7 @@ If input is unclear:
 - Only update what can be inferred
 
 ### 8. SELECTION UNDERSTANDING
-If user selects from options (like "1 વાગ્યા વાળો ચાલશે")
+If user selects from options (like "{selection_example}")
 → interpret it as confirmation of that slot
 → update time accordingly
 → keep intent
@@ -282,7 +347,7 @@ KEEP pending_action = "waiting_for_confirmation" until user confirms.
 
 SET pending_action = "none" ONLY when:
 
-- user explicitly confirms for example :- "હા", "ઓકે", "કરી દો"
+- user explicitly confirms for example :- {yes_words_str}
 OR
 - action has been completed
 

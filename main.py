@@ -25,6 +25,7 @@ from services.calendar_provider import verify_calendar_connection
 import prompts
 import calendar_tool
 from calendar_tool import *
+import config
 
 # ── Tenant Context ───────────────────────────────────────────────────────────
 class TenantContext:
@@ -203,8 +204,8 @@ admin_sessions: Dict[str, dict] = {}
 # super_admin_sessions maps token → {email}
 superadmin_sessions: Dict[str, dict] = {}
 
-MAX_HISTORY = 5
-MAX_TOOL_ITERATIONS = 2
+max_history = config.MAX_HISTORY
+max_tool_iterations = config.MAX_TOOL_ITERATIONS
 
 # Gujarati number words → digits
 # Includes Gujarati Unicode + phonetic romanized STT variants (Fix 3)
@@ -582,7 +583,7 @@ async def run_tool_async(tool_name: str, args: dict):
     func = globals()[tool_name]
     return await asyncio.to_thread(func, **args)
 
-MIN_CHUNK_CHARS = 20
+min_chunk_chars = config.MIN_CHUNK_CHARS
 
 # ── Fix 2: TTS output filter — block tool calls / JSON from being spoken ─────
 _TOOL_BLOCK_RE = re.compile(
@@ -630,11 +631,11 @@ def split_into_sentences(text: str) -> List[str]:
         if not part:
             continue
         buffer = (buffer + " " + part).strip() if buffer else part
-        if len(buffer) >= MIN_CHUNK_CHARS:
+        if len(buffer) >= min_chunk_chars:
             chunks.append(buffer)
             buffer = ""
     if buffer:
-        if chunks and len(buffer) < MIN_CHUNK_CHARS:
+        if chunks and len(buffer) < min_chunk_chars:
             chunks[-1] += " " + buffer
         else:
             chunks.append(buffer)
@@ -647,7 +648,7 @@ def split_into_sentences(text: str) -> List[str]:
     retry=retry_if_exception_type(Exception),
     before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed…")
 )
-async def tts_convert(text: str, speaker: str = "simran", lang: str = "gu-IN") -> str:
+async def tts_convert(text: str, speaker: str, lang: str) -> str:
     """Blocking HTTP TTS — only used for fallback/error messages."""
     res = await client_tts.text_to_speech.convert(
         text=text,
@@ -883,9 +884,9 @@ class StreamingTTSSession:
 async def safe_llm_call(messages):
     return await llm_with_tools.ainvoke(messages)
 
-async def extract_memory(user_text: str, memory: dict):
+async def extract_memory(user_text: str, memory: dict, lang_code: str = "gu-IN"):
     try:
-        prompt = prompts.get_memory_extraction_prompt()
+        prompt = prompts.get_memory_extraction_prompt(lang_code)
 
         today = datetime.now().strftime("%Y-%m-%d")
 
@@ -925,18 +926,22 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
     log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}' | phone='{chat_sessions.get(session_id, {}).get('phone_number')}' | tenant='{chat_sessions.get(session_id, {}).get('tenant_id')}'")
 
     if user_text == "__UNCLEAR__":
-        clarification = "માફ કરશો, મને સ્પષ્ટ સંભળાયું નહીં. શું તમે ફરીથી કહી શકો?"
+        bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+        fb_speaker = bot_cfg.get("tts_speaker", "simran")
+        fb_lang = bot_cfg.get("language_code", "gu-IN")
+
+        clarification = prompts.LANG_PACK.get(fb_lang, prompts.LANG_PACK["gu-IN"])["unclear_msg"]
         log("[BRAIN]", "Noisy input — sending clarification")
         sentences = split_into_sentences(clarification)
         await websocket.send_json({"type": "ai_text", "text": clarification, "chunk_count": len(sentences)})
         await websocket.send_json({"type": "ai_speaking_start"})
         if tts_session:
             done_evt = asyncio.Event()
-            await tts_session.speak(sentences, "simran", "gu-IN", 0, done_evt)
+            await tts_session.speak(sentences, fb_speaker, fb_lang, 0, done_evt)
             await done_evt.wait()
         else:
             for idx, sentence in enumerate(sentences):
-                audio_b64 = await tts_convert(sentence)
+                audio_b64 = await tts_convert(sentence, fb_speaker, fb_lang)
                 await websocket.send_json({
                     "type": "audio_chunk", "index": idx, "total": len(sentences),
                     "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
@@ -973,7 +978,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
     memory = session_data.get("memory", {})
     
     # Extract memory using small LLM
-    new_memory = await extract_memory(user_text, memory)
+    new_memory = await extract_memory(user_text, memory, tts_lang)
     
     # Merge memory
     updated_memory = merge_memory(memory, new_memory)
@@ -992,7 +997,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
         history.insert(0, SystemMessage(content=system_prompt))
 
     history.append(HumanMessage(content=user_text))
-    recent_history = [history[0]] + history[-MAX_HISTORY:]
+    recent_history = [history[0]] + history[-max_history:]
 
     log("[MEMORY]", f"Updated: {updated_memory}")
 
@@ -1011,8 +1016,8 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
     tool_iteration = 0
     while ai_msg.tool_calls:
         tool_iteration += 1
-        if tool_iteration > MAX_TOOL_ITERATIONS:
-            log("[TOOLS]", f"Max tool iterations ({MAX_TOOL_ITERATIONS}). Forcing AI response.")
+        if tool_iteration > max_tool_iterations:
+            log("[TOOLS]", f"Max tool iterations ({max_tool_iterations}). Forcing AI response.")
             break
         log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
@@ -1061,7 +1066,7 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
 
         tool_results = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
         history.extend(tool_results)
-        recent_history = [history[0]] + history[-MAX_HISTORY:]
+        recent_history = [history[0]] + history[-max_history:]
         t_llm2 = datetime.now()
         log("[LLM]", f"Post-tool ainvoke()")
         try:
@@ -1075,8 +1080,8 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
     reply_text = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
     history.append(ai_msg)
 
-    if len(history) > MAX_HISTORY * 2 + 2:
-        history[:] = [history[0]] + history[-(MAX_HISTORY * 2):]
+    if len(history) > max_history * 2 + 2:
+        history[:] = [history[0]] + history[-(max_history * 2):]
 
     # Fix 4: store last AI response for echo detection
     session_data["last_ai_text"] = reply_text
@@ -1127,11 +1132,11 @@ async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
 
 # ── Silence warm-up for Sarvam STT ────────────────────────────────────────────
 _SILENCE_FRAME_B64 = base64.b64encode(bytes(4096 * 2)).decode("utf-8")
-_WARMUP_FRAMES = 10
+_warmup_frames = config.WARMUP_FRAMES
 
 async def _warmup_sarvam(sarvam_ws, label: str):
-    log("[STT_WARMUP]", f"{label} — priming Sarvam with {_WARMUP_FRAMES} silence frames")
-    for i in range(_WARMUP_FRAMES):
+    log("[STT_WARMUP]", f"{label} — priming Sarvam with {_warmup_frames} silence frames")
+    for i in range(_warmup_frames):
         try:
             await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
             await asyncio.sleep(0.04)
@@ -1163,7 +1168,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     # This lets us add a server-side post-TTS buffer without any async sleep.
     import time as _time
     ai_speaking_until: list = [0.0]   # mutable float in a list so nested funcs can write it
-    AI_POST_TTS_BUFFER = 0.90          # seconds of mic-silence after browser sends ai_speaking_end
+    ai_post_tts_buffer = config.AI_POST_TTS_BUFFER         # seconds of mic-silence after browser sends ai_speaking_end
 
     def _ai_is_speaking() -> bool:
         return _time.monotonic() < ai_speaking_until[0]
@@ -1267,10 +1272,10 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             log("[CTRL]", "ai_speaking_start → mic MUTED")
 
                         elif ctrl_type == "ai_speaking_end":
-                            # Fix 1: add post-TTS buffer — mic stays blocked for AI_POST_TTS_BUFFER
+                            # Fix 1: add post-TTS buffer — mic stays blocked for ai_post_tts_buffer
                             # seconds after browser fires onended, preventing feedback from audio tail
-                            ai_speaking_until[0] = _time.monotonic() + AI_POST_TTS_BUFFER
-                            log("[CTRL]", f"ai_speaking_end → mic blocked until +{AI_POST_TTS_BUFFER}s | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
+                            ai_speaking_until[0] = _time.monotonic() + ai_post_tts_buffer
+                            log("[CTRL]", f"ai_speaking_end → mic blocked until +{ai_post_tts_buffer}s | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
 
                         elif ctrl_type == "commit_transcript":
                             text = ctrl.get("text", "").strip()
@@ -1321,14 +1326,24 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     async def sarvam_sender():
         nonlocal _sent
         reconnect_num = 0
-        MAX_RECONNECTS = 15
+        max_reconnects = config.MAX_RECONNECTS
 
-        while reconnect_num <= MAX_RECONNECTS:
+        while reconnect_num <= max_reconnects:
             attempt_label = f"conn#{reconnect_num + 1}"
-            log("[STT_SEND]", f"Opening Sarvam STT connection ({attempt_label})")
+
+            if reconnect_num == 0:
+                for _ in range(15):
+                    if chat_sessions.get(session_id, {}).get("bot_config"):
+                        break
+                    await asyncio.sleep(0.1)
+
+            bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+            stt_lang = bot_cfg.get("language_code", "gu-IN")
+
+            log("[STT_SEND]", f"Opening Sarvam STT connection ({attempt_label}) lang={stt_lang}")
             try:
                 async with client_stt.speech_to_text_streaming.connect(
-                    model="saaras:v3", language_code="gu-IN", sample_rate=16000
+                    model="saaras:v3", language_code=stt_lang, sample_rate=16000
                 ) as sarvam_ws:
                     log("[STT_SEND]", f"Sarvam STT ESTABLISHED ({attempt_label})")
 
@@ -1389,9 +1404,9 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                 log("[STT_SEND]", f"Sarvam connect FAILED ({attempt_label}): {e}")
 
             reconnect_num += 1
-            if reconnect_num <= MAX_RECONNECTS:
+            if reconnect_num <= max_reconnects:
                 wait_s = min(2 ** reconnect_num, 16)
-                log("[STT_SEND]", f"Reconnecting in {wait_s}s (attempt {reconnect_num + 1}/{MAX_RECONNECTS})")
+                log("[STT_SEND]", f"Reconnecting in {wait_s}s (attempt {reconnect_num + 1}/{max_reconnects})")
                 try:
                     await websocket.send_json({
                         "type": "stt_reconnecting",
@@ -1480,6 +1495,10 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                         fallback_text = _get_fallback_message(e)
                         log("[BRAIN_CONSUMER]", f"Sending fallback TTS: '{fallback_text}'")
                         try:
+                            bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+                            fb_speaker = bot_cfg.get("tts_speaker", "simran")
+                            fb_lang = bot_cfg.get("language_code", "gu-IN")
+
                             await websocket.send_json({
                                 "type": "ai_text", "text": fallback_text, "chunk_count": 1
                             })
@@ -1489,7 +1508,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             import random as _rand
                             resp_id = _rand.randint(1, 999999)
                             await tts_session.speak(
-                                [fallback_text], "simran", "gu-IN", resp_id, done_evt
+                                [fallback_text], fb_speaker, fb_lang, resp_id, done_evt
                             )
                             await done_evt.wait()
                         except Exception as tts_err:

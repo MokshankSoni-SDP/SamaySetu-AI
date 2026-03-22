@@ -45,6 +45,16 @@ def get_session_context():
     return session.get("tenant_id"), session.get("phone_number")
 
 
+def get_tenant_config():
+    """Return bot_config from the active WebSocket session."""
+    if tenant_context is None:
+        return {}
+    session = tenant_context.chat_sessions.get(tenant_context.session_id)
+    if not session:
+        return {}
+    return session.get("bot_config", {})
+
+
 def _get_service_and_calendar(tenant_id: str):
     """
     Thin wrapper so every tool function gets (service, calendar_id) in one line
@@ -94,28 +104,37 @@ def is_past_time(start_time_str: str) -> bool:
 
 
 def is_within_business_hours(start_time_str: str) -> bool:
+    bot_cfg = get_tenant_config()
+    start_hour = bot_cfg.get("business_hours_start", config.BUSINESS_START_HOUR)
+    end_hour = bot_cfg.get("business_hours_end", config.BUSINESS_END_HOUR)
+    
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     hour = naive_dt.hour
-    return config.BUSINESS_START_HOUR <= hour < config.BUSINESS_END_HOUR
+    return start_hour <= hour < end_hour
 
 
 # ── Tool: check_calendar_availability ────────────────────────────────────────
 
 def check_calendar_availability(
     start_time_str: str,
-    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    duration_minutes: Optional[int] = None,
     phone_number: Optional[str] = None,
 ):
     """Checks if a time slot is free in this tenant's Google Calendar."""
     tenant_id, _ = get_session_context()
+    bot_cfg = get_tenant_config()
+    if duration_minutes is None:
+        duration_minutes = bot_cfg.get("slot_duration_mins", config.DEFAULT_APPOINTMENT_DURATION)
 
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
 
     if not is_within_business_hours(start_time_str):
+        start_hour = bot_cfg.get("business_hours_start", config.BUSINESS_START_HOUR)
+        end_hour = bot_cfg.get("business_hours_end", config.BUSINESS_END_HOUR)
         return (
             f"Error: We only accept appointments between "
-            f"{config.BUSINESS_START_HOUR}:00 AM and {config.BUSINESS_END_HOUR}:00 PM. "
+            f"{start_hour}:00 and {end_hour}:00. "
             "Please choose a different time."
         )
 
@@ -147,12 +166,15 @@ def check_calendar_availability(
 
 def suggest_next_available_slot(
     start_time_str: str,
-    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    duration_minutes: Optional[int] = None,
     search_hours: int = 4,
     max_slots: int = 3,
     phone_number: Optional[str] = None,
 ):
     tenant_id, _ = get_session_context()
+    bot_cfg = get_tenant_config()
+    if duration_minutes is None:
+        duration_minutes = bot_cfg.get("slot_duration_mins", config.DEFAULT_APPOINTMENT_DURATION)
 
     try:
         service, calendar_id = _get_service_and_calendar(tenant_id)
@@ -213,11 +235,15 @@ def suggest_next_available_slot(
 def book_appointment(
     start_time_str: str,
     summary: str = "AI Appointment",
-    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    duration_minutes: Optional[int] = None,
     phone_number: Optional[str] = None,
 ):
     """Books a Google Calendar event for this tenant and stores the appointment in the DB."""
     ctx_tenant_id, ctx_phone = get_session_context()
+    bot_cfg = get_tenant_config()
+    if duration_minutes is None:
+        duration_minutes = bot_cfg.get("slot_duration_mins", config.DEFAULT_APPOINTMENT_DURATION)
+
     if not phone_number:
         phone_number = ctx_phone
     tenant_id = ctx_tenant_id
@@ -225,7 +251,7 @@ def book_appointment(
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
 
-    availability = check_calendar_availability(start_time_str)
+    availability = check_calendar_availability(start_time_str, duration_minutes=duration_minutes)
     if "BUSY" in availability:
         return "Error: Slot already occupied."
     if "Error" in availability:
@@ -327,7 +353,7 @@ def cancel_appointment(
 def reschedule_appointment(
     old_start_time_str: str,
     new_start_time_str: str,
-    duration_minutes: int = config.DEFAULT_APPOINTMENT_DURATION,
+    duration_minutes: Optional[int] = None,
     phone_number: Optional[str] = None,
 ):
     """
@@ -336,6 +362,10 @@ def reschedule_appointment(
     Ownership guard: same as cancel_appointment.
     """
     ctx_tenant_id, ctx_phone = get_session_context()
+    bot_cfg = get_tenant_config()
+    if duration_minutes is None:
+        duration_minutes = bot_cfg.get("slot_duration_mins", config.DEFAULT_APPOINTMENT_DURATION)
+
     if not phone_number:
         phone_number = ctx_phone
     tenant_id = ctx_tenant_id
@@ -360,7 +390,7 @@ def reschedule_appointment(
         return f"Error: No appointment found at {old_start_time_str}."
 
     # 3. Check new slot is free
-    availability = check_calendar_availability(new_start_time_str)
+    availability = check_calendar_availability(new_start_time_str, duration_minutes=duration_minutes)
     if "BUSY" in availability:
         return f"Error: The new slot {new_start_time_str} is already occupied."
     if "Error" in availability:
