@@ -8,7 +8,7 @@ CALENDAR_TIMEZONE = 'Asia/Kolkata'
 
 
 #--------------main----------------
-MAX_HISTORY = 5
+MAX_HISTORY = 4
 MAX_TOOL_ITERATIONS = 2
 
 MIN_CHUNK_CHARS = 20
