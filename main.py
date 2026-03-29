@@ -1,14 +1,25 @@
+"""
+main.py
+-------
+SamaySetu AI — FastAPI application entry point.
+Handles: HTTP routes, WebSocket voice sessions, admin/superadmin REST APIs,
+         module configuration endpoints, knowledge base management.
+
+Brain logic (LLM, memory, tools) lives in brain.py.
+Module system lives in modules/.
+"""
+
 import os
-import re
-import re as _re
 import json
 import base64
 import asyncio
-import struct
-import traceback
-import hashlib
 import secrets
+import hashlib
+import traceback
 from contextlib import asynccontextmanager
+from typing import Dict, List, Optional
+from datetime import datetime, date
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,103 +27,52 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sarvamai import AsyncSarvamAI, AudioOutput
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 load_dotenv()
 
-from typing import Dict, List, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from services.calendar_provider import verify_calendar_connection
-
-import prompts
-import calendar_tool
-from calendar_tool import *
 import config
-
-# ── Tenant Context ───────────────────────────────────────────────────────────
-class TenantContext:
-    """Lightweight carrier that tells calendar_tool which session is active."""
-    session_id: Optional[str] = None
-    chat_sessions: Optional[dict] = None
-
-tenant_context = TenantContext()
-
-
-def get_current_tenant() -> Optional[str]:
-    """Return the tenant_id for the active session, or None."""
-    if not tenant_context.chat_sessions or not tenant_context.session_id:
-        return None
-    session = tenant_context.chat_sessions.get(tenant_context.session_id)
-    return session.get("tenant_id") if session else None
-
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from datetime import datetime, date
-
-GROQ_SMALL_LLM_KEY = os.getenv("GROQ_SMALL_LLM")
-
-small_llm = ChatGroq(
-    api_key=GROQ_SMALL_LLM_KEY,
-    model="llama-3.1-8b-instant",   # or any 8B Groq model
-    temperature=0
+import prompts
+from brain import (
+    run_brain, log,
+    is_noisy_transcript, is_echo_of_ai,
+    split_into_sentences, compute_rms, _get_fallback_message,
 )
 
-# ── Database imports ────────────────────────────────────────────────────────
+# ── DB imports ────────────────────────────────────────────────────────────────
 try:
     from database.models import create_tables
     from database.crud import (
-        create_user_if_not_exists,
-        get_user_appointments,
-        get_tenant_by_id,
-        get_bot_config,
-        upsert_bot_config,
-        get_tenant_users,
-        get_tenant_stats,
-        get_tenant_appointments_for_date,
-        get_tenant_appointments_range,
-        get_all_tenants,
-        create_tenant,
-        get_platform_stats,
-        update_tenant_status,
-        create_tenant_admin,
-        get_admin_by_email,
-        save_calendar_token,
-        get_calendar_token,
+        create_user_if_not_exists, get_user_appointments,
+        get_tenant_by_id, get_bot_config, upsert_bot_config,
+        get_tenant_users, get_tenant_stats,
+        get_tenant_appointments_for_date, get_tenant_appointments_range,
+        get_all_tenants, create_tenant, get_platform_stats,
+        update_tenant_status, create_tenant_admin, get_admin_by_email,
+        save_calendar_token, get_calendar_token,
+        # Module operations
+        get_all_module_configs, set_module_enabled, get_enabled_modules,
+        # Knowledge base
+        add_knowledge, get_all_knowledge, delete_knowledge, delete_all_knowledge,
     )
     DB_AVAILABLE = True
-except ImportError as _db_import_err:
+except ImportError as _db_err:
     DB_AVAILABLE = False
-    print(f"[DB] Database module missing: {_db_import_err}")
+    print(f"[DB] Database module missing: {_db_err}")
+
+try:
+    from services.calendar_provider import verify_calendar_connection
+    CALENDAR_SERVICE_AVAILABLE = True
+except ImportError:
+    CALENDAR_SERVICE_AVAILABLE = False
 
 
-def log(step: str, msg: str):
-    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{ts}] {step}: {msg}")
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    if DB_AVAILABLE:
-        await asyncio.to_thread(create_tables)
-    else:
-        print("[DB] Skipping table creation — psycopg2 unavailable.")
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Pydantic models ─────────────────────────────────────────────────────────
+# ── Pydantic models ────────────────────────────────────────────────────────────
 
 class UserLoginRequest(BaseModel):
     phone_number: str
     name: Optional[str] = None
-    tenant_id: Optional[str] = None   # Optional — resolved from host/header if not sent
+    tenant_id: Optional[str] = None
 
 class AdminLoginRequest(BaseModel):
     email: str
@@ -146,158 +106,50 @@ class BotConfigRequest(BaseModel):
 
 class CalendarConnectRequest(BaseModel):
     calendar_id: str
-    service_account_json: str   # JSON string of the service account credentials
+    service_account_json: str
+
+class ModuleToggleRequest(BaseModel):
+    module_name: str
+    is_enabled: bool
+
+class KnowledgeUploadRequest(BaseModel):
+    content: str
 
 
-SARVAM_API_KEY = os.getenv('SARVAM_API_KEY')
+# ── App lifecycle ──────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if DB_AVAILABLE:
+        await asyncio.to_thread(create_tables)
+    else:
+        print("[DB] Skipping table creation — psycopg2 unavailable.")
+    yield
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+
+# ── In-memory session stores ───────────────────────────────────────────────────
+chat_sessions:       Dict[str, dict] = {}
+admin_sessions:      Dict[str, dict] = {}
+superadmin_sessions: Dict[str, dict] = {}
+
+
+# ── Sarvam STT / TTS clients ──────────────────────────────────────────────────
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 client_stt = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
 client_tts = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
-tools = [check_calendar_availability, book_appointment, cancel_appointment,
-         reschedule_appointment, suggest_next_available_slot]
-llm_with_tools = llm.bind_tools(tools)
-
-# ── HTML page routes (must come BEFORE the /static mount) ───────────────────
-@app.get("/")
-async def serve_customer():
-    return FileResponse("static/index.html")
-
-@app.get("/admin")
-async def serve_admin():
-    return FileResponse("static/admin.html")
-
-@app.get("/superadmin")
-async def serve_superadmin():
-    return FileResponse("static/superadmin.html")
-
-# ── Public endpoint: bot config for customer UI (no auth needed) ─────────────
-@app.get("/public/bot-config")
-async def public_bot_config(tenant_id: Optional[str] = None):
-    """
-    Returns the safe subset of bot_config that the customer UI needs
-    (name, description, greeting, hours, language, speaker).
-    No secrets, no calendar credentials.
-    """
-    if not tenant_id or not DB_AVAILABLE:
-        return {}
-    try:
-        cfg = await asyncio.to_thread(get_bot_config, tenant_id)
-        if not cfg:
-            return {}
-        # Only expose safe fields to the public
-        return {k: cfg[k] for k in (
-            "bot_name", "receptionist_name", "language_code", "tts_speaker",
-            "business_hours_start", "business_hours_end", "slot_duration_mins",
-            "silence_timeout_ms", "greeting_message", "business_description",
-        ) if k in cfg}
-    except Exception:
-        return {}
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# ── In-memory session store ──────────────────────────────────────────────────
-# chat_sessions maps session_id → {history, phone_number, tenant_id, bot_config}
-chat_sessions: Dict[str, dict] = {}
-# admin_sessions maps token → {tenant_id, email, role}
-admin_sessions: Dict[str, dict] = {}
-# super_admin_sessions maps token → {email}
-superadmin_sessions: Dict[str, dict] = {}
-
-max_history = config.MAX_HISTORY
-max_tool_iterations = config.MAX_TOOL_ITERATIONS
-
-# Gujarati number words → digits
-# Includes Gujarati Unicode + phonetic romanized STT variants (Fix 3)
-GUJ_NUMBERS = {
-    # Authentic Gujarati script
-    "એક": 1, "બે": 2, "ત્રણ": 3, "ચાર": 4,
-    "પાંચ": 5, "છ": 6, "સાત": 7, "આઠ": 8,
-    "નવ": 9, "દસ": 10, "અગિયાર": 11, "બાર": 12,
-    # Phonetic romanized variants (common Sarvam STT outputs)
-    "ek": 1, "eak": 1, "aek": 1, "1": 1,
-    "be": 2, "bay": 2, "2": 2,
-    "tran": 3, "teen": 3, "tin": 3, "3": 3,
-    "char": 4, "chaar": 4, "4": 4,
-    "panch": 5, "paanch": 5, "5": 5,
-    "chha": 6, "chhah": 6, "cha": 6, "6": 6,
-    "saat": 7, "sat": 7, "7": 7,
-    "aath": 8, "ath": 8, "8": 8,
-    "nav": 9, "9": 9,
-    "das": 10, "10": 10,
-    "agiyar": 11, "eleven": 11, "11": 11,
-    "bar": 12, "bara": 12, "baara": 12, "twelve": 12, "12": 12,
-}
-SPECIAL_PHRASES = {"દોઢ": (1, 30), "અઢી": (2, 30)}
-COMMON_STT_VARIANTS = {
-    "સ્વા": "સવા", "સવા": "સવા",
-    "સાડા": "સાડા", "પોના": "પોણા", "પોણા": "પોણા"
-}
-# Phonetic romanized prefix variants → standard Gujarati (Fix 3)
-PHONETIC_PREFIX_MAP = {
-    "sava ": "સવા ", "saava ": "સવા ",
-    "sada ": "સાડા ", "saada ": "સાડા ", "sade ": "સાડા ",
-    "pona ": "પોણા ", "pauna ": "પોણા ", "paune ": "પોણા ",
-}
-
-def is_noisy_transcript(text: str) -> bool:
-    stripped = _re.sub(r'[\s.,!?।\u0964]+', ' ', text).strip()
-    if len(stripped) <= 3:
-        return True
-    tokens = stripped.split()
-    from collections import Counter
-    counts = Counter(tokens)
-    if any(v >= 3 for v in counts.values()):
-        return True
-    if len(tokens) >= 4:
-        unique = len(set(tokens))
-        if unique / len(tokens) < 0.5:
-            return True
-    return False
-
-def normalize_variants(text):
-    for wrong, correct in COMMON_STT_VARIANTS.items():
-        text = text.replace(wrong, correct)
-    return text
-
-def normalize_phonetic_numbers(text: str) -> str:
-    """Pre-pass: map phonetic romanized time-prefixes to Gujarati before regex (Fix 3)."""
-    t = text.lower()
-    for roman, gujarati in PHONETIC_PREFIX_MAP.items():
-        t = t.replace(roman, gujarati)
-    return t
-
-def normalize_gujarati_time(text: str) -> str:
-    text = text.lower().strip()
-    # Fix 3 pre-pass — convert phonetic romanized prefixes to Gujarati
-    text = normalize_phonetic_numbers(text)
-    for phrase, (h, m) in SPECIAL_PHRASES.items():
-        if phrase in text:
-            text = text.replace(phrase, f"{h}:{m:02d}")
-    text = normalize_variants(text)
-    for prefix, minutes, offset in [("સવા", 15, 0), ("સાડા", 30, 0), ("પોણા", 45, -1)]:
-        match = re.search(rf"{prefix}\s*(\w+)", text)
-        if match:
-            hour_word = match.group(1)
-            # Fix 3: look up both Gujarati & romanized variants
-            hour = GUJ_NUMBERS.get(hour_word) or GUJ_NUMBERS.get(hour_word.lower())
-            if hour:
-                h = hour + offset
-                text = text.replace(match.group(0), f"{h}:{minutes}")
-    return text
-
-def _get_fallback_message(exc: Exception) -> str:
-    err_str = str(exc).lower()
-    if "rate_limit" in err_str or "429" in err_str:
-        return "માફ કરશો, અત્યારે સર્વર ખૂબ વ્યસ્ત છે. થોડી વાર પછી ફરી પ્રયત્ન કરો."
-    if "timeout" in err_str or "timed out" in err_str:
-        return "માફ કરશો, જવાબ આવવામાં વધુ સમય લાગ્યો. કૃપા કરી ફરી પ્રયત્ન કરો."
-    if "connection" in err_str or "network" in err_str:
-        return "નેટવર્ક સમસ્યા આવી. કૃપા કરી ઇન્ટરનેટ તપાસો અને ફરી બોલો."
-    return "માફ કરશો, કંઈક ભૂલ થઈ. થોડી વાર પછી ફરી પ્રયત્ન કરો."
+_SILENCE_FRAME_B64 = base64.b64encode(bytes(4096 * 2)).decode("utf-8")
+_warmup_frames = config.WARMUP_FRAMES
 
 
-# ── Auth helpers ──────────────────────────────────────────────────────────────
+# ── Auth helpers ───────────────────────────────────────────────────────────────
 
 def _hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -313,335 +165,8 @@ def _check_superadmin_token(x_superadmin_token: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Superadmin access denied")
 
 
-# ── REST endpoints ────────────────────────────────────────────────────────────
+# ── TTS helpers ────────────────────────────────────────────────────────────────
 
-# ── Customer endpoints ────────────────────────────────────────────────────────
-
-@app.post("/user/login")
-async def user_login(req: UserLoginRequest):
-    if not req.phone_number or not req.phone_number.strip():
-        raise HTTPException(status_code=400, detail="phone_number is required")
-    if not DB_AVAILABLE:
-        return {"status": "success", "phone_number": req.phone_number, "db": False}
-    try:
-        await asyncio.to_thread(
-            create_user_if_not_exists,
-            req.phone_number.strip(), req.name, req.tenant_id
-        )
-        return {"status": "success", "phone_number": req.phone_number.strip()}
-    except Exception as e:
-        print(f"[DB] /user/login error: {e}")
-        raise HTTPException(status_code=500, detail="Database error during login")
-
-
-@app.get("/appointments/{phone_number}")
-async def get_appointments(phone_number: str, tenant_id: Optional[str] = None):
-    if not DB_AVAILABLE:
-        return []
-    try:
-        appts = await asyncio.to_thread(get_user_appointments, phone_number, tenant_id)
-        return appts
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Could not fetch appointments")
-
-
-# ── Admin auth endpoints ──────────────────────────────────────────────────────
-
-@app.post("/admin/login")
-async def admin_login(req: AdminLoginRequest):
-    if not DB_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    admin = await asyncio.to_thread(get_admin_by_email, req.email)
-    if not admin:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if admin["password_hash"] != _hash_password(req.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not admin.get("tenant_active", True):
-        raise HTTPException(status_code=403, detail="This account is suspended")
-    token = secrets.token_hex(32)
-    admin_sessions[token] = {
-        "tenant_id": admin["tenant_id"],
-        "email": admin["email"],
-        "role": admin["role"],
-        "business_name": admin.get("business_name", ""),
-    }
-    return {"token": token, "tenant_id": admin["tenant_id"],
-            "role": admin["role"], "business_name": admin.get("business_name")}
-
-
-@app.post("/admin/logout")
-async def admin_logout(session=Depends(_check_admin_token),
-                       x_admin_token: Optional[str] = Header(None)):
-    if x_admin_token in admin_sessions:
-        del admin_sessions[x_admin_token]
-    return {"status": "logged out"}
-
-
-# ── Admin dashboard endpoints ─────────────────────────────────────────────────
-
-@app.get("/admin/stats")
-async def admin_stats(session=Depends(_check_admin_token)):
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        return {}
-    stats = await asyncio.to_thread(get_tenant_stats, tenant_id)
-    return stats
-
-
-@app.get("/admin/appointments/today")
-async def admin_today(session=Depends(_check_admin_token)):
-    tenant_id = session["tenant_id"]
-    today = date.today().isoformat()
-    if not DB_AVAILABLE:
-        return []
-    appts = await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, today)
-    return appts
-
-
-@app.get("/admin/appointments")
-async def admin_appointments(session=Depends(_check_admin_token),
-                              from_date: Optional[str] = None,
-                              to_date: Optional[str] = None,
-                              appt_date: Optional[str] = None):
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        return []
-    if appt_date:
-        return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, appt_date)
-    if from_date and to_date:
-        return await asyncio.to_thread(get_tenant_appointments_range, tenant_id, from_date, to_date)
-    # Default: today
-    today = date.today().isoformat()
-    return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, today)
-
-
-@app.get("/admin/users")
-async def admin_users(session=Depends(_check_admin_token)):
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        return []
-    return await asyncio.to_thread(get_tenant_users, tenant_id)
-
-
-@app.get("/admin/bot-config")
-async def admin_get_config(session=Depends(_check_admin_token)):
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        return {}
-    cfg = await asyncio.to_thread(get_bot_config, tenant_id)
-    return cfg or {}
-
-
-@app.post("/admin/bot-config")
-async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_token)):
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    fields = {k: v for k, v in req.dict().items() if v is not None}
-    cfg = await asyncio.to_thread(upsert_bot_config, tenant_id, **fields)
-    return cfg
-
-
-@app.post("/admin/calendar/connect")
-async def admin_connect_calendar(
-    req: CalendarConnectRequest,
-    session=Depends(_check_admin_token),
-):
-    """
-    Store Google Calendar credentials for this tenant AND verify they work.
- 
-    Steps:
-      1. Validate the submitted JSON is parseable.
-      2. Save credentials to the DB.
-      3. Call the Google Calendar freebusy API to confirm the service account
-         can actually access the calendar.
-      4. Return connected=True only when step 3 succeeds; otherwise return an
-         actionable error so the admin knows what to fix.
-    """
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Database unavailable")
- 
-    # Step 1 — validate JSON shape
-    try:
-        json.loads(req.service_account_json)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid service account JSON")
- 
-    # Step 2 — persist to DB
-    await asyncio.to_thread(
-        save_calendar_token, tenant_id, req.calendar_id, req.service_account_json
-    )
-    await asyncio.to_thread(upsert_bot_config, tenant_id, calendar_id=req.calendar_id)
- 
-    # Step 3 — live verification against Google Calendar API
-    result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
-    if not result["ok"]:
-        # Credentials saved but verification failed — tell the admin why
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Credentials saved but Google Calendar verification failed: "
-                f"{result['error']}. "
-                "Check that the service account has been shared with this calendar."
-            ),
-        )
- 
-    # Step 4 — all good
-    return {
-        "status": "connected",
-        "verified": True,
-        "calendar_id": req.calendar_id,
-    }
-
-
-@app.get("/admin/calendar/status")
-async def admin_calendar_status(session=Depends(_check_admin_token)):
-    """
-    Returns real-time calendar connection status by actually calling Google.
-    'connected: true' means credentials exist AND Google accepted them just now.
-    """
-    tenant_id = session["tenant_id"]
-    if not DB_AVAILABLE:
-        return {"connected": False}
- 
-    token = await asyncio.to_thread(get_calendar_token, tenant_id)
-    if not token:
-        return {"connected": False}
- 
-    # Run a live check instead of just returning "row exists"
-    result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
-    if result["ok"]:
-        return {
-            "connected": True,
-            "verified": True,
-            "calendar_id": token["calendar_id"],
-            "connected_at": token.get("connected_at"),
-        }
-    else:
-        return {
-            "connected": False,
-            "verified": False,
-            "calendar_id": token["calendar_id"],
-            "error": result["error"],
-        }
-
-
-# ── Superadmin (SamaySetu platform owner) endpoints ──────────────────────────
-
-@app.get("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
-async def superadmin_tenants():
-    if not DB_AVAILABLE:
-        return []
-    return await asyncio.to_thread(get_all_tenants)
-
-
-@app.post("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
-async def superadmin_create_tenant(req: TenantCreateRequest):
-    if not DB_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    tenant = await asyncio.to_thread(
-        create_tenant, req.business_name, req.business_type, req.owner_email
-    )
-    # Create default bot config
-    await asyncio.to_thread(upsert_bot_config, tenant["tenant_id"],
-                             bot_name=req.business_name)
-    # Create owner admin account
-    await asyncio.to_thread(
-        create_tenant_admin,
-        tenant["tenant_id"], req.owner_email,
-        _hash_password(req.admin_password), "owner"
-    )
-    return tenant
-
-
-@app.patch("/superadmin/tenants/{tenant_id}/status",
-           dependencies=[Depends(_check_superadmin_token)])
-async def superadmin_set_status(tenant_id: str, is_active: bool):
-    if not DB_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    ok = await asyncio.to_thread(update_tenant_status, tenant_id, is_active)
-    return {"updated": ok}
-
-
-@app.get("/superadmin/stats", dependencies=[Depends(_check_superadmin_token)])
-async def superadmin_stats():
-    if not DB_AVAILABLE:
-        return {}
-    return await asyncio.to_thread(get_platform_stats)
-
-
-# ── Token usage logger ────────────────────────────────────────────────────────
-def print_token_usage(msg, step_name):
-    usage = msg.response_metadata.get("token_usage", {})
-    if usage:
-        print(f"--- 📊 {step_name} | prompt={usage.get('prompt_tokens')} "
-              f"completion={usage.get('completion_tokens')} "
-              f"total={usage.get('total_tokens')} ---")
-
-async def run_tool_async(tool_name: str, args: dict):
-    func = globals()[tool_name]
-    return await asyncio.to_thread(func, **args)
-
-min_chunk_chars = config.MIN_CHUNK_CHARS
-
-# ── Fix 2: TTS output filter — block tool calls / JSON from being spoken ─────
-_TOOL_BLOCK_RE = re.compile(
-    r'<function=[^>]*>.*?(?:</function>|$)'  # <function=name>...</function>
-    r'|\{[^{}]{0,800}"(?:tool_name|function_name|arguments|tool_use_id)"[^{}]{0,800}\}',
-    re.DOTALL,
-)
-
-def is_tool_output(text: str) -> bool:
-    """Return True if the whole reply is a raw tool/JSON artifact (Fix 2)."""
-    t = text.strip()
-    return (
-        t.startswith("{") or
-        t.startswith("[{") or
-        "<function=" in t or
-        '"tool_name"' in t or
-        '"function_name"' in t
-    )
-
-def clean_for_tts(text: str) -> str:
-    """Strip tool call fragments from mixed LLM output before TTS (Fix 2)."""
-    text = _TOOL_BLOCK_RE.sub("", text)
-    # Remove any remaining bare JSON-looking blocks (conservative: must have quotes)
-    text = re.sub(r'\{[^}]{0,500}\}', "", text)
-    return text.strip()
-
-# ── Fix 4: AI-echo similarity filter ─────────────────────────────────────────
-def is_echo_of_ai(user_text: str, ai_text: str, threshold: float = 0.75) -> bool:
-    """Jaccard token overlap — catches mic capturing AI's own speech (Fix 4)."""
-    if not ai_text or not user_text:
-        return False
-    u_tokens = set(user_text.lower().split())
-    a_tokens = set(ai_text.lower().split())
-    if not u_tokens or len(u_tokens) < 3:  # too short to judge
-        return False
-    intersection = u_tokens & a_tokens
-    union = u_tokens | a_tokens
-    return len(intersection) / len(union) >= threshold
-
-def split_into_sentences(text: str) -> List[str]:
-    raw = re.split(r'(?<=[.!?।\u0964])\s+', text.strip())
-    chunks, buffer = [], ""
-    for part in raw:
-        part = part.strip()
-        if not part:
-            continue
-        buffer = (buffer + " " + part).strip() if buffer else part
-        if len(buffer) >= min_chunk_chars:
-            chunks.append(buffer)
-            buffer = ""
-    if buffer:
-        if chunks and len(buffer) < min_chunk_chars:
-            chunks[-1] += " " + buffer
-        else:
-            chunks.append(buffer)
-    return chunks or [text]
-
-# ── Fallback: non-streaming TTS (used only for error/fallback messages) ────────
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=4),
@@ -649,34 +174,16 @@ def split_into_sentences(text: str) -> List[str]:
     before_sleep=lambda rs: log("[TTS_RETRY]", f"Attempt {rs.attempt_number} failed…")
 )
 async def tts_convert(text: str, speaker: str, lang: str) -> str:
-    """Blocking HTTP TTS — only used for fallback/error messages."""
     res = await client_tts.text_to_speech.convert(
-        text=text,
-        target_language_code=lang,
-        model="bulbul:v3",
-        speaker=speaker
+        text=text, target_language_code=lang,
+        model="bulbul:v3", speaker=speaker
     )
     return res.audios[0]
 
 
-# ── Streaming TTS session — one per voice WebSocket connection ────────────────
+# ── Streaming TTS session ──────────────────────────────────────────────────────
+
 class StreamingTTSSession:
-    """
-    Streaming TTS via Bulbul v3 WebSocket.
-
-    Architecture:
-    - Opens a FRESH WS per response (clean lifecycle, no "iterator never exits" problem).
-    - Runs two concurrent tasks inside each WS:
-        sender:   sends each sentence + flush() one by one
-        receiver: async for message in tts_ws → forwards chunks to browser immediately
-    - The sender signals an asyncio.Event when all text is sent.
-    - The receiver runs until the WS context manager exits (which happens after
-      the sender finishes and a short idle window confirms no more chunks arrive).
-    - Each chunk is forwarded to the browser THE MOMENT it arrives — true streaming.
-    - Frontend receives many small audio_chunk messages and plays them via
-      MediaSource API (gapless streaming), so chunk count doesn't matter.
-    """
-
     _SENTINEL = object()
 
     def __init__(self, browser_ws: WebSocket):
@@ -687,15 +194,8 @@ class StreamingTTSSession:
     def start(self):
         self._task = asyncio.create_task(self._run_forever())
 
-    async def speak(
-        self,
-        sentences: List[str],
-        speaker: str,
-        lang: str,
-        response_id: int,
-        done_event: asyncio.Event,
-    ):
-        """Enqueue a speak request. Returns immediately; done_event is set when audio is fully sent."""
+    async def speak(self, sentences: List[str], speaker: str, lang: str,
+                    response_id: int, done_event: asyncio.Event):
         await self._queue.put((sentences, speaker, lang, response_id, done_event))
 
     async def close(self):
@@ -712,12 +212,8 @@ class StreamingTTSSession:
             try:
                 item = await self._queue.get()
                 if item is self._SENTINEL:
-                    log("[TTS_STREAM]", "Sentinel — shutting down")
                     return
-
                 sentences, speaker, lang, response_id, done_event = item
-                log("[TTS_STREAM]", f"resp_id={response_id} | {len(sentences)} sentence(s) | "
-                    f"speaker={speaker} lang={lang}")
                 try:
                     await self._do_speak(sentences, speaker, lang, response_id)
                 except Exception as e:
@@ -725,52 +221,28 @@ class StreamingTTSSession:
                     await self._fallback_http(sentences, speaker, lang, response_id)
                 finally:
                     done_event.set()
-
             except asyncio.CancelledError:
-                log("[TTS_STREAM]", "Worker cancelled")
                 return
             except Exception as e:
                 log("[TTS_STREAM]", f"Unexpected worker error: {e}")
 
-    async def _do_speak(
-        self,
-        sentences: List[str],
-        speaker: str,
-        lang: str,
-        response_id: int,
-    ):
-        """
-        TRUE streaming path.
-        - Sender task:   configure → per-sentence convert() + flush()
-        - Receiver task: async for message in tts_ws → forward chunk to browser immediately
-        - Drain logic:   after sender finishes, keep reading until no new chunk arrives
-          for IDLE_AFTER_LAST_CHUNK_S seconds (rolling reset on every chunk).
-          This is robust regardless of how long synthesis takes.
-        """
+    async def _do_speak(self, sentences, speaker, lang, response_id):
         chunk_count = 0
-        send_done   = asyncio.Event()
-        last_chunk_event = asyncio.Event()   # pulsed each time a chunk arrives
+        send_done = asyncio.Event()
+        last_chunk_event = asyncio.Event()
 
-        async with client_tts.text_to_speech_streaming.connect(
-            model="bulbul:v3"
-        ) as tts_ws:
-            log("[TTS_STREAM]", f"resp_id={response_id} WS open")
-
-            # ── Sender ────────────────────────────────────────────────────────
+        async with client_tts.text_to_speech_streaming.connect(model="bulbul:v3") as tts_ws:
             async def sender():
                 try:
                     await tts_ws.configure(target_language_code=lang, speaker=speaker)
                     for sentence in sentences:
-                        log("[TTS_STREAM]", f"resp_id={response_id} → '{sentence[:60]}'")
                         await tts_ws.convert(sentence)
                         await tts_ws.flush()
-                    log("[TTS_STREAM]", f"resp_id={response_id} sender done")
                 except Exception as e:
                     log("[TTS_STREAM]", f"resp_id={response_id} sender error: {e}")
                 finally:
                     send_done.set()
 
-            # ── Receiver ──────────────────────────────────────────────────────
             async def receiver():
                 nonlocal chunk_count
                 try:
@@ -779,49 +251,28 @@ class StreamingTTSSession:
                             continue
                         audio_b64 = message.data.audio
                         chunk_count += 1
-                        # log("[TTS_STREAM]", f"resp_id={response_id} chunk#{chunk_count} "
-                        #     f"({len(audio_b64)} b64 chars) → browser")
                         try:
                             await self._browser_ws.send_json({
-                                "type": "audio_chunk",
-                                "index": chunk_count - 1,
-                                "total": -1,
-                                "audio": audio_b64,
-                                "audio_format": "mp3",
-                                "is_last": False,
-                                "response_id": response_id,
+                                "type": "audio_chunk", "index": chunk_count - 1, "total": -1,
+                                "audio": audio_b64, "audio_format": "mp3",
+                                "is_last": False, "response_id": response_id,
                             })
                         except Exception:
-                            log("[TTS_STREAM]", f"resp_id={response_id} browser send failed")
                             return
-                        # Signal the drain watcher that a chunk just arrived
                         last_chunk_event.set()
                         last_chunk_event.clear()
                 except asyncio.CancelledError:
                     pass
-                except Exception as e:
-                    log("[TTS_STREAM]", f"resp_id={response_id} receiver error: {e}")
-                    raise
 
             sender_task   = asyncio.create_task(sender())
             receiver_task = asyncio.create_task(receiver())
 
-            # ── Drain watcher ─────────────────────────────────────────────────
-            # Wait for sender to finish, then wait until no new chunk has arrived
-            # for IDLE_S seconds. This window resets on every chunk, so we never
-            # cut off mid-stream no matter how slow Bulbul is.
-            IDLE_S = 1.2   # seconds of silence after last chunk before we stop
+            IDLE_S = 1.2
             await send_done.wait()
-            log("[TTS_STREAM]", f"resp_id={response_id} sender done — draining (idle={IDLE_S}s)")
-
             while True:
                 try:
-                    # Wait for a new chunk to arrive within IDLE_S
                     await asyncio.wait_for(last_chunk_event.wait(), timeout=IDLE_S)
-                    # A chunk arrived — reset and wait again
                 except asyncio.TimeoutError:
-                    # No chunk for IDLE_S seconds after the last one → stream is done
-                    log("[TTS_STREAM]", f"resp_id={response_id} idle timeout — stopping receiver")
                     break
 
             receiver_task.cancel()
@@ -838,301 +289,383 @@ class StreamingTTSSession:
         if chunk_count == 0:
             raise RuntimeError("No audio chunks received from Bulbul")
 
-        log("[TTS_STREAM]", f"resp_id={response_id} ✓ {chunk_count} chunks streamed to browser")
         try:
             await self._browser_ws.send_json({
-                "type": "tts_done",
-                "response_id": response_id,
-                "total_chunks": chunk_count,
+                "type": "tts_done", "response_id": response_id, "total_chunks": chunk_count,
             })
         except Exception:
             pass
 
-    async def _fallback_http(
-        self,
-        sentences: List[str],
-        speaker: str,
-        lang: str,
-        response_id: int,
-    ):
-        """HTTP fallback — used only if WS fails. Single call for full text."""
-        log("[TTS_STREAM]", f"resp_id={response_id} HTTP fallback")
+    async def _fallback_http(self, sentences, speaker, lang, response_id):
         try:
             full_text = " ".join(sentences)
             audio_b64 = await tts_convert(full_text, speaker, lang)
             await self._browser_ws.send_json({
-                "type": "audio_chunk",
-                "index": 0, "total": 1,
-                "audio": audio_b64,
-                "audio_format": "wav",
-                "is_last": True,
-                "response_id": response_id,
+                "type": "audio_chunk", "index": 0, "total": 1,
+                "audio": audio_b64, "audio_format": "wav",
+                "is_last": True, "response_id": response_id,
             })
-            await self._browser_ws.send_json({
-                "type": "tts_done",
-                "response_id": response_id,
-            })
+            await self._browser_ws.send_json({"type": "tts_done", "response_id": response_id})
         except Exception as e:
             log("[TTS_STREAM]", f"resp_id={response_id} HTTP fallback also failed: {e}")
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=1, max=5),
-    retry=retry_if_exception_type(Exception),
-    before_sleep=lambda rs: log("[LLM_RETRY]", f"Attempt {rs.attempt_number} failed…")
-)
-async def safe_llm_call(messages):
-    return await llm_with_tools.ainvoke(messages)
 
-async def extract_memory(user_text: str, memory: dict, lang_code: str = "gu-IN"):
+# ── HTML page routes ───────────────────────────────────────────────────────────
+
+@app.get("/")
+async def serve_customer():
+    return FileResponse("static/index.html")
+
+@app.get("/admin")
+async def serve_admin():
+    return FileResponse("static/admin.html")
+
+@app.get("/superadmin")
+async def serve_superadmin():
+    return FileResponse("static/superadmin.html")
+
+@app.get("/public/bot-config")
+async def public_bot_config(tenant_id: Optional[str] = None):
+    if not tenant_id or not DB_AVAILABLE:
+        return {}
     try:
-        prompt = prompts.get_memory_extraction_prompt(lang_code)
-
-        today = datetime.now().strftime("%Y-%m-%d")
-
-        messages = [
-            SystemMessage(content=prompt),
-            HumanMessage(content=f"""
-                    Today date: {today}
-
-                    Current memory:
-                    {json.dumps(memory)}
-                    
-                    User input:
-                    {user_text}
-                    """)
-        ]
-
-        response = await small_llm.ainvoke(messages)
-
-        extracted = safe_json_parse(response.content)
-
-        return extracted
-
-    except Exception as e:
-        print("[MEMORY] Extraction failed:", e)
+        cfg = await asyncio.to_thread(get_bot_config, tenant_id)
+        if not cfg:
+            return {}
+        return {k: cfg[k] for k in (
+            "bot_name", "receptionist_name", "language_code", "tts_speaker",
+            "business_hours_start", "business_hours_end", "slot_duration_mins",
+            "silence_timeout_ms", "greeting_message", "business_description",
+        ) if k in cfg}
+    except Exception:
         return {}
 
-async def run_brain(session_id: str, user_text: str, websocket: WebSocket,
-                    tts_session: Optional["StreamingTTSSession"] = None):
-    t0    = datetime.now()
-    today = t0.strftime("%Y-%m-%d")
-    day   = t0.strftime("%A")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    log("[NORMALIZER]", f"Before: {user_text}")
-    user_text = normalize_gujarati_time(user_text)
-    log("[NORMALIZER]", f"After: {user_text}")
 
-    log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}' | phone='{chat_sessions.get(session_id, {}).get('phone_number')}' | tenant='{chat_sessions.get(session_id, {}).get('tenant_id')}'")
+# ── Customer endpoints ─────────────────────────────────────────────────────────
 
-    if user_text == "__UNCLEAR__":
-        bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
-        fb_speaker = bot_cfg.get("tts_speaker", "simran")
-        fb_lang = bot_cfg.get("language_code", "gu-IN")
-
-        clarification = prompts.LANG_PACK.get(fb_lang, prompts.LANG_PACK["gu-IN"])["unclear_msg"]
-        log("[BRAIN]", "Noisy input — sending clarification")
-        sentences = split_into_sentences(clarification)
-        await websocket.send_json({"type": "ai_text", "text": clarification, "chunk_count": len(sentences)})
-        await websocket.send_json({"type": "ai_speaking_start"})
-        if tts_session:
-            done_evt = asyncio.Event()
-            await tts_session.speak(sentences, fb_speaker, fb_lang, 0, done_evt)
-            await done_evt.wait()
-        else:
-            for idx, sentence in enumerate(sentences):
-                audio_b64 = await tts_convert(sentence, fb_speaker, fb_lang)
-                await websocket.send_json({
-                    "type": "audio_chunk", "index": idx, "total": len(sentences),
-                    "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
-                })
-            await websocket.send_json({"type": "tts_done"})
-        return
-
-    if session_id not in chat_sessions:
-        chat_sessions[session_id] = {"history": [],
-                                     "phone_number": None,
-                                     "tenant_id": None,
-                                     "bot_config": None,
-                                     "memory":{
-                                        "intent": None,
-                                        "pending_action": "waiting_for_confirmation",
-                                        "appointment": {
-                                            "date": None,
-                                            "time": None,
-                                            "duration": None
-                                        },
-                                        "reschedule": {
-                                            "old_time": None,
-                                            "new_time": None
-                                        }
-                                     }}
-
-    session_data = chat_sessions[session_id]
-    history      = session_data["history"]
-    phone_number = session_data.get("phone_number")
-    bot_config   = session_data.get("bot_config") or {}
-    tts_speaker  = bot_config.get("tts_speaker", "simran")
-    tts_lang     = bot_config.get("language_code", "gu-IN")
-
-    memory = session_data.get("memory", {})
-    
-    # Extract memory using small LLM
-    new_memory = await extract_memory(user_text, memory, tts_lang)
-    
-    # Merge memory
-    updated_memory = merge_memory(memory, new_memory)
-    
-    print(updated_memory)
-    # Save back
-    session_data["memory"] = updated_memory
-
-    memory_context = f"\n\n=== MEMORY STATE ===\n{json.dumps(session_data.get('memory', {}))}"
-
-    system_prompt = prompts.get_system_prompt(today, day, bot_config) + memory_context
-
-    if history and isinstance(history[0], SystemMessage):
-        history[0] = SystemMessage(content=system_prompt)
-    else:
-        history.insert(0, SystemMessage(content=system_prompt))
-
-    history.append(HumanMessage(content=user_text))
-    recent_history = [history[0]] + history[-max_history:]
-
-    log("[MEMORY]", f"Updated: {updated_memory}")
-
-    t_llm = datetime.now()
-    preview = str(recent_history[0].content)[:80] if recent_history else 'NONE'
-    log("[LLM]", f"ainvoke() | {len(recent_history)} messages | sys_prompt_preview='{preview}'")
+@app.post("/user/login")
+async def user_login(req: UserLoginRequest):
+    if not req.phone_number or not req.phone_number.strip():
+        raise HTTPException(status_code=400, detail="phone_number is required")
+    if not DB_AVAILABLE:
+        return {"status": "success", "phone_number": req.phone_number, "db": False}
     try:
-        ai_msg = await safe_llm_call(recent_history)
-        log("[LLM]", f"Done in {(datetime.now()-t_llm).total_seconds():.2f}s | "
-            f"tool_calls={len(ai_msg.tool_calls)}")
-        print_token_usage(ai_msg, "Initial LLM")
+        await asyncio.to_thread(
+            create_user_if_not_exists,
+            req.phone_number.strip(), req.name, req.tenant_id
+        )
+        return {"status": "success", "phone_number": req.phone_number.strip()}
     except Exception as e:
-        log("[LLM]", f"FAILED: {e}\n{traceback.format_exc()}")
-        raise
-
-    tool_iteration = 0
-    while ai_msg.tool_calls:
-        tool_iteration += 1
-        if tool_iteration > max_tool_iterations:
-            log("[TOOLS]", f"Max tool iterations ({max_tool_iterations}). Forcing AI response.")
-            break
-        log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
-        history.append(ai_msg)
-
-        async def execute_tool(tool_call):
-            tname = tool_call["name"]
-            targs = tool_call["args"]
-            if phone_number:
-                targs = {**targs, "phone_number": phone_number}
-            # ── Inject tenant context so calendar_tool uses the correct tenant_id ─
-            tenant_context.session_id    = session_id
-            tenant_context.chat_sessions = chat_sessions
-            calendar_tool.tenant_context = tenant_context
-            log("[TOOL]", f"Executing '{tname}' | args={targs} | tenant={get_current_tenant()}")
-            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": "running"})
-            t_tool = datetime.now()
-            try:
-                obs    = await run_tool_async(tname, targs)
-                if "success" in str(obs).lower():
-                    print("$$$state memory deleted after success$$$")
-                    session_data["memory"] = {
-                            "intent": "none",
-                            "pending_action": "waiting_for_confirmation",
-                            "appointment": {
-                                "date": None,
-                                "time": None,
-                                "duration": None
-                            },
-                            "reschedule": {
-                                "old_time": None,
-                                "new_time": None
-                            },
-                            "date_context": {
-                                "resolved_date": None,
-                                "source": "none"
-                            }
-                        }
-
-                status = "ok"
-                log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s | result='{str(obs)[:100]}'")
-            except Exception as e:
-                obs, status = f"Error: {e}", "error"
-                log("[TOOL]", f"'{tname}' FAILED: {e}")
-            await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": status, "result": str(obs)})
-            return ToolMessage(content=str(obs), tool_call_id=tool_call["id"])
-
-        tool_results = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
-        history.extend(tool_results)
-        recent_history = [history[0]] + history[-max_history:]
-        t_llm2 = datetime.now()
-        log("[LLM]", f"Post-tool ainvoke()")
-        try:
-            ai_msg = await safe_llm_call(recent_history)
-            log("[LLM]", f"Done in {(datetime.now()-t_llm2).total_seconds():.2f}s")
-            print_token_usage(ai_msg, "Post-tool LLM")
-        except Exception as e:
-            log("[LLM]", f"Post-tool FAILED: {e}")
-            raise
-
-    reply_text = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
-    history.append(ai_msg)
-
-    if len(history) > max_history * 2 + 2:
-        history[:] = [history[0]] + history[-(max_history * 2):]
-
-    # Fix 4: store last AI response for echo detection
-    session_data["last_ai_text"] = reply_text
-
-    # Fix 2: filter tool/JSON output — do NOT speak raw tool artifacts
-    if is_tool_output(reply_text):
-        log("[TTS_FILTER]", f"Blocked tool output from TTS: '{reply_text[:80]}'")
-        log("[BRAIN]", f"DONE (tool-only, no TTS) in {(datetime.now()-t0).total_seconds():.2f}s")
-        return
-
-    # Fix 2: strip any stray tool fragments from mixed text before TTS
-    tts_text = clean_for_tts(reply_text)
-    if not tts_text:
-        log("[TTS_FILTER]", "Reply cleaned to empty — skipping TTS")
-        log("[BRAIN]", f"DONE (empty after clean) in {(datetime.now()-t0).total_seconds():.2f}s")
-        return
-
-    sentences = split_into_sentences(tts_text)
-    log("[BRAIN]", f"Reply: '{tts_text[:80]}' | {len(sentences)} sentences")
-
-    await websocket.send_json({"type": "ai_text", "text": reply_text, "chunk_count": len(sentences)})
-    await websocket.send_json({"type": "ai_speaking_start"})
-
-    if tts_session:
-        # ── Streaming TTS path ────────────────────────────────────────────────
-        # We enqueue all sentences at once; the streaming session sends audio
-        # chunks to the browser as they arrive from Bulbul — no per-sentence wait.
-        done_evt = asyncio.Event()
-        import random
-        resp_id = random.randint(1, 999999)
-        log("[TTS_STREAM]", f"Enqueuing {len(sentences)} sentence(s) | resp_id={resp_id}")
-        await tts_session.speak(sentences, tts_speaker, tts_lang, resp_id, done_evt)
-        await done_evt.wait()
-        log("[TTS_STREAM]", f"resp_id={resp_id} finished")
-    else:
-        # ── Fallback: sequential HTTP TTS ─────────────────────────────────────
-        for idx, sentence in enumerate(sentences):
-            log("[TTS]", f"Chunk {idx+1}/{len(sentences)} | speaker={tts_speaker} lang={tts_lang} | '{sentence[:60]}'")
-            audio_b64 = await tts_convert(sentence, tts_speaker, tts_lang)
-            await websocket.send_json({
-                "type": "audio_chunk", "index": idx, "total": len(sentences),
-                "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
-            })
-        await websocket.send_json({"type": "tts_done"})
-
-    log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
+        raise HTTPException(status_code=500, detail="Database error during login")
 
 
-# ── Silence warm-up for Sarvam STT ────────────────────────────────────────────
-_SILENCE_FRAME_B64 = base64.b64encode(bytes(4096 * 2)).decode("utf-8")
-_warmup_frames = config.WARMUP_FRAMES
+@app.get("/appointments/{phone_number}")
+async def get_appointments(phone_number: str, tenant_id: Optional[str] = None):
+    if not DB_AVAILABLE:
+        return []
+    try:
+        return await asyncio.to_thread(get_user_appointments, phone_number, tenant_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not fetch appointments")
+
+
+# ── Admin auth ─────────────────────────────────────────────────────────────────
+
+@app.post("/admin/login")
+async def admin_login(req: AdminLoginRequest):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    admin = await asyncio.to_thread(get_admin_by_email, req.email)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if admin["password_hash"] != _hash_password(req.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not admin.get("tenant_active", True):
+        raise HTTPException(status_code=403, detail="This account is suspended")
+    token = secrets.token_hex(32)
+    admin_sessions[token] = {
+        "tenant_id":     admin["tenant_id"],
+        "email":         admin["email"],
+        "role":          admin["role"],
+        "business_name": admin.get("business_name", ""),
+    }
+    return {"token": token, "tenant_id": admin["tenant_id"],
+            "role": admin["role"], "business_name": admin.get("business_name")}
+
+@app.post("/admin/logout")
+async def admin_logout(session=Depends(_check_admin_token),
+                       x_admin_token: Optional[str] = Header(None)):
+    if x_admin_token in admin_sessions:
+        del admin_sessions[x_admin_token]
+    return {"status": "logged out"}
+
+
+# ── Admin dashboard ────────────────────────────────────────────────────────────
+
+@app.get("/admin/stats")
+async def admin_stats(session=Depends(_check_admin_token)):
+    if not DB_AVAILABLE:
+        return {}
+    return await asyncio.to_thread(get_tenant_stats, session["tenant_id"])
+
+@app.get("/admin/appointments/today")
+async def admin_today(session=Depends(_check_admin_token)):
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(
+        get_tenant_appointments_for_date, session["tenant_id"], date.today().isoformat()
+    )
+
+@app.get("/admin/appointments")
+async def admin_appointments(session=Depends(_check_admin_token),
+                              from_date: Optional[str] = None,
+                              to_date: Optional[str] = None,
+                              appt_date: Optional[str] = None):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return []
+    if appt_date:
+        return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, appt_date)
+    if from_date and to_date:
+        return await asyncio.to_thread(get_tenant_appointments_range, tenant_id, from_date, to_date)
+    return await asyncio.to_thread(
+        get_tenant_appointments_for_date, tenant_id, date.today().isoformat()
+    )
+
+@app.get("/admin/users")
+async def admin_users(session=Depends(_check_admin_token)):
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(get_tenant_users, session["tenant_id"])
+
+@app.get("/admin/bot-config")
+async def admin_get_config(session=Depends(_check_admin_token)):
+    if not DB_AVAILABLE:
+        return {}
+    return await asyncio.to_thread(get_bot_config, session["tenant_id"]) or {}
+
+@app.post("/admin/bot-config")
+async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_token)):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    fields = {k: v for k, v in req.dict().items() if v is not None}
+    return await asyncio.to_thread(upsert_bot_config, session["tenant_id"], **fields)
+
+
+# ── Admin: Calendar ────────────────────────────────────────────────────────────
+
+@app.post("/admin/calendar/connect")
+async def admin_connect_calendar(req: CalendarConnectRequest,
+                                  session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        json.loads(req.service_account_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid service account JSON")
+
+    await asyncio.to_thread(save_calendar_token, tenant_id, req.calendar_id, req.service_account_json)
+    await asyncio.to_thread(upsert_bot_config, tenant_id, calendar_id=req.calendar_id)
+
+    if CALENDAR_SERVICE_AVAILABLE:
+        result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
+        if not result["ok"]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Credentials saved but Google Calendar verification failed: {result['error']}"
+            )
+
+    return {"status": "connected", "verified": True, "calendar_id": req.calendar_id}
+
+@app.get("/admin/calendar/status")
+async def admin_calendar_status(session=Depends(_check_admin_token)):
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        return {"connected": False}
+    token = await asyncio.to_thread(get_calendar_token, tenant_id)
+    if not token:
+        return {"connected": False}
+    if CALENDAR_SERVICE_AVAILABLE:
+        result = await asyncio.to_thread(verify_calendar_connection, tenant_id)
+        if result["ok"]:
+            return {"connected": True, "verified": True, "calendar_id": token["calendar_id"],
+                    "connected_at": token.get("connected_at")}
+        return {"connected": False, "verified": False, "calendar_id": token["calendar_id"],
+                "error": result["error"]}
+    return {"connected": bool(token), "calendar_id": token.get("calendar_id")}
+
+
+# ── Admin: Module management (NEW) ────────────────────────────────────────────
+
+@app.get("/admin/modules")
+async def admin_get_modules(session=Depends(_check_admin_token)):
+    """Get all module configs for this tenant."""
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        # Return defaults if no DB
+        return [
+            {"module_name": "BOOKING_MODULE", "is_enabled": True},
+            {"module_name": "FACTS_MODULE",   "is_enabled": False},
+        ]
+    return await asyncio.to_thread(get_all_module_configs, tenant_id)
+
+
+@app.post("/admin/modules/toggle")
+async def admin_toggle_module(req: ModuleToggleRequest, session=Depends(_check_admin_token)):
+    """Enable or disable a module for this tenant."""
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    from modules.module_registry import ALL_MODULES
+    if req.module_name not in ALL_MODULES:
+        raise HTTPException(status_code=400, detail=f"Unknown module: {req.module_name}. "
+                            f"Valid: {ALL_MODULES}")
+
+    ok = await asyncio.to_thread(set_module_enabled, tenant_id, req.module_name, req.is_enabled)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to update module config")
+
+    # Invalidate cached module config for any live sessions of this tenant
+    for sess in chat_sessions.values():
+        if sess.get("tenant_id") == tenant_id:
+            sess.pop("enabled_modules", None)
+
+    return {
+        "module_name": req.module_name,
+        "is_enabled":  req.is_enabled,
+        "status":      "updated"
+    }
+
+
+# ── Admin: Knowledge base (NEW — FACTS_MODULE) ─────────────────────────────────
+
+@app.get("/admin/knowledge")
+async def admin_get_knowledge(session=Depends(_check_admin_token)):
+    """List all knowledge entries for this tenant."""
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(get_all_knowledge, session["tenant_id"])
+
+
+@app.post("/admin/knowledge")
+async def admin_add_knowledge(req: KnowledgeUploadRequest, session=Depends(_check_admin_token)):
+    """
+    Upload knowledge content for FACTS_MODULE.
+    The text is chunked and indexed into Qdrant automatically.
+    """
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    if not req.content or not req.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    # Save raw content to DB
+    row = await asyncio.to_thread(add_knowledge, tenant_id, req.content.strip())
+
+    # Index into Qdrant (runs in thread to avoid blocking)
+    chunks_indexed = 0
+    try:
+        from modules.facts_module import index_knowledge
+        chunks_indexed = await asyncio.to_thread(index_knowledge, tenant_id, req.content.strip())
+    except Exception as e:
+        print(f"[FACTS] Qdrant indexing failed (content saved to DB): {e}")
+
+    return {
+        "id":             row.get("id"),
+        "chunks_indexed": chunks_indexed,
+        "status":         "saved"
+    }
+
+
+@app.delete("/admin/knowledge/{knowledge_id}")
+async def admin_delete_knowledge(knowledge_id: str, session=Depends(_check_admin_token)):
+    """Delete a single knowledge entry (DB only; Qdrant vectors remain until re-index)."""
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    deleted = await asyncio.to_thread(delete_knowledge, knowledge_id, session["tenant_id"])
+    return {"deleted": deleted}
+
+
+@app.delete("/admin/knowledge")
+async def admin_clear_knowledge(session=Depends(_check_admin_token)):
+    """Delete ALL knowledge for this tenant (DB + Qdrant vectors)."""
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    count = await asyncio.to_thread(delete_all_knowledge, tenant_id)
+
+    try:
+        from modules.facts_module import delete_tenant_knowledge
+        await asyncio.to_thread(delete_tenant_knowledge, tenant_id)
+    except Exception as e:
+        print(f"[FACTS] Qdrant clear failed: {e}")
+
+    return {"deleted_rows": count, "status": "cleared"}
+
+
+@app.post("/admin/knowledge/reindex")
+async def admin_reindex_knowledge(session=Depends(_check_admin_token)):
+    """Re-index all DB knowledge into Qdrant (useful after Qdrant restart)."""
+    tenant_id = session["tenant_id"]
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    rows = await asyncio.to_thread(get_all_knowledge, tenant_id)
+    total_chunks = 0
+    try:
+        from modules.facts_module import index_knowledge, delete_tenant_knowledge
+        await asyncio.to_thread(delete_tenant_knowledge, tenant_id)
+        for row in rows:
+            n = await asyncio.to_thread(index_knowledge, tenant_id, row["content"])
+            total_chunks += n
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reindex failed: {e}")
+
+    return {"entries_reindexed": len(rows), "chunks_indexed": total_chunks}
+
+
+# ── Superadmin endpoints ───────────────────────────────────────────────────────
+
+@app.get("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_tenants():
+    if not DB_AVAILABLE:
+        return []
+    return await asyncio.to_thread(get_all_tenants)
+
+@app.post("/superadmin/tenants", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_create_tenant(req: TenantCreateRequest):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    tenant = await asyncio.to_thread(
+        create_tenant, req.business_name, req.business_type, req.owner_email
+    )
+    await asyncio.to_thread(upsert_bot_config, tenant["tenant_id"], bot_name=req.business_name)
+    await asyncio.to_thread(
+        create_tenant_admin, tenant["tenant_id"], req.owner_email,
+        _hash_password(req.admin_password), "owner"
+    )
+    return tenant
+
+@app.patch("/superadmin/tenants/{tenant_id}/status",
+           dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_set_status(tenant_id: str, is_active: bool):
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    return {"updated": await asyncio.to_thread(update_tenant_status, tenant_id, is_active)}
+
+@app.get("/superadmin/stats", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_stats():
+    if not DB_AVAILABLE:
+        return {}
+    return await asyncio.to_thread(get_platform_stats)
+
+
+# ── Sarvam STT warm-up ─────────────────────────────────────────────────────────
 
 async def _warmup_sarvam(sarvam_ws, label: str):
     log("[STT_WARMUP]", f"{label} — priming Sarvam with {_warmup_frames} silence frames")
@@ -1148,13 +681,13 @@ async def _warmup_sarvam(sarvam_ws, label: str):
 
 
 # ── WebSocket voice handler ────────────────────────────────────────────────────
+
 @app.websocket("/ws/voice")
 async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     await websocket.accept()
     session_id = f"web_{datetime.now().strftime('%H%M%S%f')}"
     log("[WS]", f"Connection ACCEPTED | session='{session_id}' | phone='{phone_number}'")
 
-    # Session is pre-created with phone from query param; set_user / init can update it
     chat_sessions[session_id] = {
         "history":      [],
         "phone_number": phone_number,
@@ -1162,13 +695,11 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         "bot_config":   {},
     }
 
-    brain_lock   = asyncio.Lock()
-    # Fix 1: Replace asyncio.Event with a float epoch-seconds timestamp.
-    # Mic is blocked while time.monotonic() < ai_speaking_until.
-    # This lets us add a server-side post-TTS buffer without any async sleep.
+    brain_lock = asyncio.Lock()
+
     import time as _time
-    ai_speaking_until: list = [0.0]   # mutable float in a list so nested funcs can write it
-    ai_post_tts_buffer = config.AI_POST_TTS_BUFFER         # seconds of mic-silence after browser sends ai_speaking_end
+    ai_speaking_until: list = [0.0]
+    ai_post_tts_buffer = config.AI_POST_TTS_BUFFER
 
     def _ai_is_speaking() -> bool:
         return _time.monotonic() < ai_speaking_until[0]
@@ -1176,16 +707,13 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     commit_queue: asyncio.Queue = asyncio.Queue()
     audio_buf:    asyncio.Queue = asyncio.Queue(maxsize=300)
 
-    # ── Streaming TTS session (separate Bulbul v3 WebSocket) ─────────────────
     tts_session = StreamingTTSSession(websocket)
     tts_session.start()
     log("[WS]", "StreamingTTSSession started")
 
     _recv = _drop_ai = _sent = 0
 
-    # ── Task 1: Single browser receiver — handles both binary PCM and JSON ctrl ─
-    # IMPORTANT: Only ONE coroutine may call websocket.receive() at a time.
-    # The old split into browser_listener + raw_audio_listener broke this rule.
+    # ── Task 1: Browser receiver ──────────────────────────────────────────────
     async def browser_to_sarvam():
         nonlocal _recv, _drop_ai, _sent, phone_number
         log("[AUDIO_TASK]", "browser_to_sarvam() started")
@@ -1197,69 +725,56 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                     log("[AUDIO_TASK]", f"Browser disconnected: {e}")
                     break
 
-                # ── JSON control messages ─────────────────────────────────────
                 if "text" in msg:
                     try:
                         ctrl      = json.loads(msg["text"])
                         ctrl_type = ctrl.get("type", "unknown")
 
                         if ctrl_type == "init":
-                            # New customer UI sends 'init' with session_id, phone, tenant
-                            new_phone   = ctrl.get("phone_number")
-                            tenant_id   = ctrl.get("tenant_id")
-                            new_sess_id = ctrl.get("session_id", session_id)
+                            new_phone = ctrl.get("phone_number")
+                            tenant_id = ctrl.get("tenant_id")
                             if new_phone:
                                 phone_number = new_phone
                                 chat_sessions[session_id]["phone_number"] = new_phone
                             if tenant_id:
                                 chat_sessions[session_id]["tenant_id"] = tenant_id
-                                # Load tenant bot config so the brain uses the right persona
                                 if DB_AVAILABLE:
                                     try:
                                         bot_cfg = await asyncio.to_thread(get_bot_config, tenant_id)
                                         chat_sessions[session_id]["bot_config"] = bot_cfg or {}
                                         log("[WS]", f"Bot config loaded for tenant={tenant_id}")
-                                        
-                                        # Trigger greeting if configured
+
                                         if bot_cfg and bot_cfg.get("greeting_message"):
                                             greeting_text = bot_cfg["greeting_message"]
-                                            tts_speaker = bot_cfg.get("tts_speaker", "simran")
-                                            tts_lang = bot_cfg.get("language_code", "gu-IN")
-                                            
+                                            tts_speaker   = bot_cfg.get("tts_speaker", "simran")
+                                            tts_lang      = bot_cfg.get("language_code", "gu-IN")
+
                                             async def play_initial_greeting():
                                                 try:
-                                                    log("[GREETING]", f"Preparing initial greeting: {greeting_text[:30]}...")
                                                     sentences = split_into_sentences(greeting_text)
-                                                    
-                                                    # Lock the brain during greeting
                                                     async with brain_lock:
                                                         await websocket.send_json({
-                                                            "type": "ai_text",
-                                                            "text": greeting_text,
+                                                            "type": "ai_text", "text": greeting_text,
                                                             "chunk_count": len(sentences)
                                                         })
                                                         await websocket.send_json({"type": "ai_speaking_start"})
-                                                        
                                                         done_evt = asyncio.Event()
                                                         import random as _rand
                                                         resp_id = _rand.randint(1, 999999)
                                                         await tts_session.speak(
-                                                            sentences, tts_speaker, tts_lang,
-                                                            resp_id, done_evt
+                                                            sentences, tts_speaker, tts_lang, resp_id, done_evt
                                                         )
                                                         await done_evt.wait()
-                                                        log("[GREETING]", "Greeting playback finished")
                                                 except Exception as e:
-                                                    log("[GREETING]", f"Error playing greeting: {e}")
-                                            
+                                                    log("[GREETING]", f"Error: {e}")
+
                                             asyncio.create_task(play_initial_greeting())
-                                            
                                     except Exception as cfg_err:
                                         log("[WS]", f"Bot config load failed: {cfg_err}")
+
                             log("[WS]", f"init | session={session_id} phone={phone_number} tenant={tenant_id}")
 
                         elif ctrl_type == "set_user":
-                            # Old-style message — still supported
                             phone = ctrl.get("phone_number")
                             if phone and session_id in chat_sessions:
                                 phone_number = phone
@@ -1267,46 +782,36 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                 log("[WS]", f"set_user phone={phone}")
 
                         elif ctrl_type == "ai_speaking_start":
-                            # Fix 1: set timestamp far ahead (30s max guard)
                             ai_speaking_until[0] = _time.monotonic() + 30.0
                             log("[CTRL]", "ai_speaking_start → mic MUTED")
 
                         elif ctrl_type == "ai_speaking_end":
-                            # Fix 1: add post-TTS buffer — mic stays blocked for ai_post_tts_buffer
-                            # seconds after browser fires onended, preventing feedback from audio tail
                             ai_speaking_until[0] = _time.monotonic() + ai_post_tts_buffer
-                            log("[CTRL]", f"ai_speaking_end → mic blocked until +{ai_post_tts_buffer}s | recv={_recv} sent={_sent} drop_ai={_drop_ai}")
+                            log("[CTRL]", f"ai_speaking_end → mic blocked +{ai_post_tts_buffer}s")
 
                         elif ctrl_type == "commit_transcript":
                             text = ctrl.get("text", "").strip()
                             speaking_now = _ai_is_speaking()
-                            log("[COMMIT]", f"Received text='{text}' | ai_speaking={speaking_now} | queue_size={commit_queue.qsize()}")
                             if not text:
-                                log("[COMMIT]", "IGNORED — empty text")
+                                pass
                             elif speaking_now:
-                                log("[COMMIT]", f"DROPPED (AI speaking/buffer): '{text}'")
+                                log("[COMMIT]", f"DROPPED (AI speaking): '{text}'")
                             elif is_noisy_transcript(text):
-                                log("[COMMIT]", f"DROPPED (noisy): '{text}' → sending __UNCLEAR__")
                                 await commit_queue.put("__UNCLEAR__")
                             else:
-                                # Fix 4: echo detection — drop if too similar to last AI response
                                 last_ai = chat_sessions.get(session_id, {}).get("last_ai_text", "")
                                 if is_echo_of_ai(text, last_ai):
-                                    log("[COMMIT]", f"DROPPED (echo of AI): '{text}'")
+                                    log("[COMMIT]", f"DROPPED (echo): '{text}'")
                                 else:
-                                    log("[COMMIT]", f"QUEUED: '{text}'")
                                     await commit_queue.put(text)
-                        else:
-                            log("[CTRL]", f"Unknown ctrl type='{ctrl_type}'")
+
                     except Exception as e:
                         log("[CTRL]", f"JSON parse error: {e}")
                     continue
 
-                # ── Raw PCM audio bytes ───────────────────────────────────────
                 if "bytes" in msg:
                     _recv += 1
                     raw = msg["bytes"]
-                    # Fix 1: gate on timestamp instead of asyncio.Event
                     if _ai_is_speaking():
                         _drop_ai += 1
                         continue
@@ -1322,10 +827,10 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         except Exception as e:
             log("[AUDIO_TASK]", f"Crashed: {e}\n{traceback.format_exc()}")
 
-    # ── Task 2: audio_buf → Sarvam STT (with automatic reconnect) ────────────
+    # ── Task 2: audio_buf → Sarvam STT ──────────────────────────────────────
     async def sarvam_sender():
         nonlocal _sent
-        reconnect_num = 0
+        reconnect_num  = 0
         max_reconnects = config.MAX_RECONNECTS
 
         while reconnect_num <= max_reconnects:
@@ -1337,10 +842,10 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                         break
                     await asyncio.sleep(0.1)
 
-            bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+            bot_cfg  = chat_sessions.get(session_id, {}).get("bot_config") or {}
             stt_lang = bot_cfg.get("language_code", "gu-IN")
 
-            log("[STT_SEND]", f"Opening Sarvam STT connection ({attempt_label}) lang={stt_lang}")
+            log("[STT_SEND]", f"Opening Sarvam STT ({attempt_label}) lang={stt_lang}")
             try:
                 async with client_stt.speech_to_text_streaming.connect(
                     model="saaras:v3", language_code=stt_lang, sample_rate=16000
@@ -1349,7 +854,6 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
 
                     ok = await _warmup_sarvam(sarvam_ws, attempt_label)
                     if not ok:
-                        log("[STT_SEND]", "Warm-up failed — will reconnect")
                         reconnect_num += 1
                         await asyncio.sleep(1)
                         continue
@@ -1372,10 +876,9 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             try:
                                 raw = audio_buf.get_nowait()
                             except asyncio.QueueEmpty:
-                                now = asyncio.get_event_loop().time()
+                                now    = asyncio.get_event_loop().time()
                                 idle_s = now - last_real_pkt_time
                                 if idle_s >= KEEPALIVE_INTERVAL and not _ai_is_speaking():
-                                    log("[STT_SEND]", f"Keep-alive after {idle_s:.0f}s idle")
                                     await sarvam_ws.transcribe(audio=_SILENCE_FRAME_B64)
                                     last_real_pkt_time = now
                                 await asyncio.sleep(POLL_INTERVAL)
@@ -1386,10 +889,6 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                                 audio=base64.b64encode(raw).decode("utf-8")
                             )
                             _sent += 1
-                            if _sent % 50 == 1:
-                                rms = compute_rms(raw)
-                                log("[STT_SEND]", f"pkt#{_sent} | rms={rms:.0f} "
-                                    f"({'speech' if rms > 300 else 'silence'})")
 
                     except Exception as e:
                         log("[STT_SEND]", f"Send loop ended ({attempt_label}): {e}")
@@ -1406,24 +905,20 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
             reconnect_num += 1
             if reconnect_num <= max_reconnects:
                 wait_s = min(2 ** reconnect_num, 16)
-                log("[STT_SEND]", f"Reconnecting in {wait_s}s (attempt {reconnect_num + 1}/{max_reconnects})")
                 try:
                     await websocket.send_json({
-                        "type": "stt_reconnecting",
-                        "attempt": reconnect_num,
-                        "wait_s": wait_s
+                        "type": "stt_reconnecting", "attempt": reconnect_num, "wait_s": wait_s
                     })
                 except Exception:
                     pass
                 await asyncio.sleep(wait_s)
             else:
-                log("[STT_SEND]", "Max reconnects reached — giving up")
                 try:
                     await websocket.send_json({"type": "stt_failed"})
                 except Exception:
                     pass
 
-    # ── Task 2b: Sarvam transcript receiver (one per Sarvam connection) ───────
+    # ── Task 2b: Sarvam transcript receiver ──────────────────────────────────
     async def _sarvam_receiver(sarvam_ws, commit_queue, websocket):
         log("[STT_RECV]", "Receiver started")
         try:
@@ -1437,73 +932,64 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                     continue
 
                 speaking_now = _ai_is_speaking()
-                speaking_tag = "AI_SPEAKING" if speaking_now else "user_turn"
-                log("[DIAG:STT]", f"{'FINAL' if is_final else 'partial'} [{speaking_tag}]: '{transcript}' | noisy={is_noisy_transcript(transcript)}")
-
                 if is_final:
                     f_count += 1
-                    log("[STT_RECV]", f"FINAL #{f_count}: '{transcript}'")
                     if speaking_now:
-                        # Fix 1: blocked by timestamp guard (includes post-TTS buffer)
-                        log("[STT_RECV]", f"FINAL DROPPED (AI speaking/buffer): '{transcript}'")
+                        log("[STT_RECV]", f"FINAL DROPPED (AI speaking): '{transcript}'")
                     elif is_noisy_transcript(transcript):
-                        log("[STT_RECV]", f"FINAL DROPPED (noisy): '{transcript}'")
                         await commit_queue.put("__UNCLEAR__")
                     else:
-                        # Fix 4: echo detection — secondary guard against mic capturing AI voice tail
                         last_ai = chat_sessions.get(session_id, {}).get("last_ai_text", "")
                         if is_echo_of_ai(transcript, last_ai):
-                            log("[STT_RECV]", f"FINAL DROPPED (echo of AI): '{transcript}'")
+                            log("[STT_RECV]", f"FINAL DROPPED (echo): '{transcript}'")
                         else:
                             await commit_queue.put(transcript)
                 else:
                     p_count += 1
-                    if p_count % 5 == 1:
-                        log("[STT_RECV]", f"Partial #{p_count}: '{transcript}'")
 
                 try:
                     await websocket.send_json({
-                        "type": "transcript",
-                        "text": transcript,
-                        "is_final": is_final
+                        "type": "transcript", "text": transcript, "is_final": is_final
                     })
                 except Exception:
                     pass
 
         except asyncio.CancelledError:
-            log("[STT_RECV]", "Receiver cancelled (Sarvam reconnect in progress)")
             raise
         except Exception as e:
             log("[STT_RECV]", f"Receiver ended: {e}")
 
+    # ── Task 3: Brain consumer ────────────────────────────────────────────────
     async def brain_consumer():
-        log("[BRAIN_CONSUMER]", "Started — waiting for commits")
+        log("[BRAIN_CONSUMER]", "Started")
         while True:
             try:
                 sentence = await commit_queue.get()
-                log("[BRAIN_CONSUMER]", f"Dequeued from queue: '{sentence}' | brain_locked={brain_lock.locked()}")
+                log("[BRAIN_CONSUMER]", f"Dequeued: '{sentence}' | locked={brain_lock.locked()}")
                 if brain_lock.locked():
-                    log("[BRAIN_CONSUMER]", "Brain BUSY — dropping sentence")
+                    log("[BRAIN_CONSUMER]", "Brain BUSY — dropping")
                     continue
                 async with brain_lock:
-                    log("[BRAIN_CONSUMER]", "Lock ACQUIRED")
                     await websocket.send_json({"type": "processing_start"})
                     try:
-                        await run_brain(session_id, sentence, websocket, tts_session)
+                        await run_brain(
+                            session_id=session_id,
+                            user_text=sentence,
+                            websocket=websocket,
+                            tts_session=tts_session,
+                            chat_sessions=chat_sessions,
+                            tts_convert_fn=tts_convert,
+                        )
                     except Exception as e:
-                        log("[BRAIN_CONSUMER]", f"run_brain() FAILED: {e}")
                         fallback_text = _get_fallback_message(e)
-                        log("[BRAIN_CONSUMER]", f"Sending fallback TTS: '{fallback_text}'")
+                        bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+                        fb_speaker = bot_cfg.get("tts_speaker", "simran")
+                        fb_lang    = bot_cfg.get("language_code", "gu-IN")
                         try:
-                            bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
-                            fb_speaker = bot_cfg.get("tts_speaker", "simran")
-                            fb_lang = bot_cfg.get("language_code", "gu-IN")
-
                             await websocket.send_json({
                                 "type": "ai_text", "text": fallback_text, "chunk_count": 1
                             })
                             await websocket.send_json({"type": "ai_speaking_start"})
-                            # Use streaming TTS for fallback too
                             done_evt = asyncio.Event()
                             import random as _rand
                             resp_id = _rand.randint(1, 999999)
@@ -1513,10 +999,8 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             await done_evt.wait()
                         except Exception as tts_err:
                             log("[BRAIN_CONSUMER]", f"Fallback TTS also failed: {tts_err}")
-                        continue
-                    log("[BRAIN_CONSUMER]", "Lock RELEASED")
+
             except asyncio.CancelledError:
-                log("[BRAIN_CONSUMER]", "Cancelled — exiting")
                 break
             except Exception as e:
                 log("[BRAIN_CONSUMER]", f"Error: {e}\n{traceback.format_exc()}")
@@ -1534,29 +1018,3 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         log("[WS]", "Closing StreamingTTSSession")
         await tts_session.close()
     log("[WS]", "All tasks exited")
-
-
-
-def compute_rms(raw_bytes: bytes) -> float:
-    if len(raw_bytes) < 2:
-        return 0.0
-    samples = struct.unpack(f"<{len(raw_bytes)//2}h", raw_bytes)
-    return (sum(s * s for s in samples) / len(samples)) ** 0.5
-
-def merge_memory(old, new):
-    for key, value in new.items():
-        if isinstance(value, dict):
-            old[key] = merge_memory(old.get(key, {}), value)
-        else:
-            if value is not None:
-                old[key] = value
-    return old
-
-def safe_json_parse(text):
-    try:
-        return json.loads(text)
-    except:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise

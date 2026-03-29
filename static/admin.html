@@ -1694,6 +1694,8 @@
       <div class="nav-section">Configuration</div>
       <div class="nav-item" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
       <div class="nav-item" onclick="switchTab('calendar')"><span class="nav-icon">📆</span>Calendar Connect</div>
+      <div class="nav-item" onclick="switchTab('modules')"><span class="nav-icon">🧩</span>Modules</div>
+      <div class="nav-item" onclick="switchTab('knowledge')"><span class="nav-icon">📚</span>Knowledge Base</div>
       <div style="flex:1;"></div>
       <div class="nav-item" onclick="doAdminLogout()" style="color:var(--danger);"><span class="nav-icon">✕</span>Logout
       </div>
@@ -2218,7 +2220,7 @@
                     <div class="step-card-body">
                       In the list you will see a row for your new account. The email column shows something like:<br>
                       <span
-                        style="font-family:var(--font-mono);font-size:11px;color:var(--accent);display:block;margin:6px 0;">samaysetu-sync@your-project-id.iam.gserviceaccount.com</span>
+                        style="font-family:var(--font-mono);font-size:11px;color:var(--accent);display:block;margin:6px 0;"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="1261737f736b617766673f616b7c71526b7d67603f62607d787771663f7b763c7b737f3c75617760647b71777371717d677c663c717d7f">[email&#160;protected]</a></span>
                       Copy that email and paste it in the box below — you will need it in Step 4.
                     </div>
                     <div class="email-capture" style="margin-top:10px;">
@@ -2427,11 +2429,241 @@
           </div>
         </div>
 
+
+        <!-- MODULES TAB -->
+        <div class="tab-panel" id="tab-modules">
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Module Configuration</h3>
+              <button class="btn btn-ghost btn-sm" onclick="loadModules()">Refresh</button>
+            </div>
+            <div class="section-card-body">
+              <div class="hint-box">
+                Modules control which capabilities are active for your voice assistant.
+                Disabling a module removes its tools and instructions from the AI completely.
+                Changes take effect on the next conversation turn.
+              </div>
+              <div id="modulesBody">
+                <div class="empty-state"><span>&#129513;</span>Loading modules...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KNOWLEDGE BASE TAB -->
+        <div class="tab-panel" id="tab-knowledge">
+          <div class="section-card" style="margin-bottom:20px;">
+            <div class="section-card-header">
+              <h3>Upload Knowledge</h3>
+            </div>
+            <div class="section-card-body">
+              <div class="hint-box">
+                Knowledge is used by the <strong>FACTS_MODULE</strong> to answer informational queries.
+                Text is auto-chunked (20-30 words) and indexed into the vector database.
+                Enable FACTS_MODULE in the Modules tab first.
+              </div>
+              <div class="form-field" style="margin-bottom:14px;">
+                <label>Content to Upload</label>
+                <textarea id="knowledgeContent" rows="6"
+                  placeholder="Paste any business information here - services, prices, FAQs, policies..."
+                  style="min-height:130px;"></textarea>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <button class="btn btn-primary" onclick="uploadKnowledge()">Upload &amp; Index</button>
+                <span id="uploadKnowledgeStatus" style="font-size:12px;color:var(--muted);"></span>
+              </div>
+            </div>
+          </div>
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Stored Knowledge</h3>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-ghost btn-sm" onclick="loadKnowledge()">Refresh</button>
+                <button class="btn btn-danger btn-sm" onclick="clearAllKnowledge()">Clear All</button>
+                <button class="btn btn-ghost btn-sm" onclick="reindexKnowledge()">Re-index Qdrant</button>
+              </div>
+            </div>
+            <div class="section-card-body" id="knowledgeBody">
+              <div class="empty-state"><span>&#128218;</span>No knowledge uploaded yet.</div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- content-area -->
     </div><!-- main-content -->
   </div><!-- layout -->
 
-  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
+  <script>
+    // ══════════════════════════════════════════════════════
+    //  MODULE MANAGEMENT
+    // ══════════════════════════════════════════════════════
+
+    const MODULE_META = {
+      BOOKING_MODULE: {
+        icon: '📅',
+        title: 'Booking Module',
+        description: 'Enables appointment booking, cancellation, and rescheduling via Google Calendar. Includes all calendar tools and booking prompt logic.',
+        warning: 'Disabling this removes all appointment tools from the AI.',
+      },
+      FACTS_MODULE: {
+        icon: '📚',
+        title: 'Facts Module (RAG)',
+        description: 'Enables the AI to answer informational queries using your uploaded knowledge base. Uses Qdrant vector search + MiniLM embeddings.',
+        warning: 'Requires Qdrant to be running locally and knowledge to be uploaded.',
+      },
+    };
+
+    async function loadModules() {
+      const body = document.getElementById('modulesBody');
+      body.innerHTML = '<div class="empty-state"><span>&#129513;</span>Loading modules...</div>';
+      try {
+        const modules = await apiFetch('/admin/modules');
+        if (!modules || modules.length === 0) {
+          body.innerHTML = '<div class="empty-state"><span>&#129513;</span>No modules found.</div>';
+          return;
+        }
+        body.innerHTML = modules.map(m => {
+          const meta = MODULE_META[m.module_name] || { icon: '&#129513;', title: m.module_name, description: '', warning: '' };
+          const enabled = m.is_enabled;
+          return `
+            <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                  <span style="font-size:20px;">${meta.icon}</span>
+                  <span style="font-size:14px;font-weight:600;color:var(--text);">${meta.title}</span>
+                  <span style="font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;${enabled ? 'background:rgba(34,197,94,.15);color:var(--success);border:1px solid rgba(34,197,94,.3);' : 'background:rgba(107,114,128,.1);color:var(--muted);border:1px solid var(--border);'}">${enabled ? 'ENABLED' : 'DISABLED'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:6px;">${meta.description}</div>
+                ${meta.warning ? `<div style="font-size:11px;color:var(--warn);opacity:0.8;">&nbsp;&#9888; ${meta.warning}</div>` : ''}
+              </div>
+              <div style="flex-shrink:0;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <span style="font-size:12px;color:var(--muted);">${enabled ? 'On' : 'Off'}</span>
+                  <div class="module-toggle ${enabled ? 'on' : ''}" onclick="toggleModule('${m.module_name}', ${!enabled}, this)"
+                    style="width:46px;height:24px;border-radius:99px;cursor:pointer;position:relative;transition:background .2s;background:${enabled ? 'var(--success)' : 'var(--border)'};">
+                    <div style="position:absolute;top:3px;${enabled ? 'right:3px;' : 'left:3px;'}width:18px;height:18px;border-radius:50%;background:#fff;transition:all .2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
+                  </div>
+                </label>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (e) {
+        body.innerHTML = `<div class="empty-state" style="color:var(--danger);">&#9888; ${e.message}</div>`;
+      }
+    }
+
+    async function toggleModule(moduleName, enable, toggleEl) {
+      try {
+        await apiFetch('/admin/modules/toggle', {
+          method: 'POST',
+          body: JSON.stringify({ module_name: moduleName, is_enabled: enable })
+        });
+        showToast(`${moduleName} ${enable ? 'enabled' : 'disabled'}`, enable ? 'success' : '');
+        loadModules();
+      } catch (e) {
+        showToast('Failed: ' + e.message, 'error');
+        loadModules(); // reload to show correct state
+      }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  KNOWLEDGE BASE MANAGEMENT
+    // ══════════════════════════════════════════════════════
+
+    async function uploadKnowledge() {
+      const content = document.getElementById('knowledgeContent').value.trim();
+      if (!content) { showToast('Please enter some content first.', 'error'); return; }
+      const statusEl = document.getElementById('uploadKnowledgeStatus');
+      statusEl.textContent = 'Uploading...';
+      statusEl.style.color = 'var(--muted)';
+      try {
+        const res = await apiFetch('/admin/knowledge', {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+        statusEl.textContent = `Saved! ${res.chunks_indexed} chunks indexed in Qdrant.`;
+        statusEl.style.color = 'var(--success)';
+        document.getElementById('knowledgeContent').value = '';
+        loadKnowledge();
+      } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = 'var(--danger)';
+      }
+    }
+
+    async function loadKnowledge() {
+      const body = document.getElementById('knowledgeBody');
+      if (!body) return;
+      body.innerHTML = '<div class="empty-state"><span>&#128218;</span>Loading...</div>';
+      try {
+        const rows = await apiFetch('/admin/knowledge');
+        if (!rows || rows.length === 0) {
+          body.innerHTML = '<div class="empty-state"><span>&#128218;</span>No knowledge uploaded yet.</div>';
+          return;
+        }
+        body.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border);">
+                <th style="padding:8px 10px;text-align:left;color:var(--muted);font-weight:500;">Content Preview</th>
+                <th style="padding:8px 10px;text-align:left;color:var(--muted);font-weight:500;width:150px;">Added</th>
+                <th style="padding:8px 10px;width:60px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:10px;color:var(--text);max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.content.replace(/"/g,'&quot;')}">
+                    ${r.content.substring(0, 120)}${r.content.length > 120 ? '...' : ''}
+                  </td>
+                  <td style="padding:10px;color:var(--muted);font-size:12px;">${r.created_at ? new Date(r.created_at).toLocaleDateString() : '-'}</td>
+                  <td style="padding:10px;">
+                    <button class="btn btn-danger btn-sm" onclick="deleteKnowledge('${r.id}')">Delete</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+      } catch (e) {
+        body.innerHTML = `<div class="empty-state" style="color:var(--danger);">&#9888; ${e.message}</div>`;
+      }
+    }
+
+    async function deleteKnowledge(id) {
+      if (!confirm('Delete this knowledge entry?')) return;
+      try {
+        await apiFetch('/admin/knowledge/' + id, { method: 'DELETE' });
+        showToast('Entry deleted', '');
+        loadKnowledge();
+      } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+      }
+    }
+
+    async function clearAllKnowledge() {
+      if (!confirm('Delete ALL knowledge entries for this tenant? This cannot be undone.')) return;
+      try {
+        const res = await apiFetch('/admin/knowledge', { method: 'DELETE' });
+        showToast(`Cleared ${res.deleted_rows} entries`, '');
+        loadKnowledge();
+      } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+      }
+    }
+
+    async function reindexKnowledge() {
+      const statusEl = document.getElementById('uploadKnowledgeStatus');
+      if (statusEl) { statusEl.textContent = 'Re-indexing...'; statusEl.style.color = 'var(--muted)'; }
+      try {
+        const res = await apiFetch('/admin/knowledge/reindex', { method: 'POST' });
+        showToast(`Re-indexed ${res.entries_reindexed} entries (${res.chunks_indexed} chunks)`, 'success');
+        if (statusEl) { statusEl.textContent = `Re-indexed: ${res.chunks_indexed} chunks`; statusEl.style.color = 'var(--success)'; }
+      } catch (e) {
+        showToast('Re-index failed: ' + e.message, 'error');
+        if (statusEl) { statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = 'var(--danger)'; }
+      }
+    }
+
+  </script>
   <script>
     let adminToken = null;
     let adminSession = {};
@@ -2530,7 +2762,7 @@
       document.getElementById('adminApp').style.display = 'flex';
       document.getElementById('adminEmailDisplay').textContent = session.email || '—';
       document.getElementById('businessNameDisplay').textContent = session.business_name || '';
-      loadStats(); loadToday(); loadBotConfig(); checkCalendarStatus();
+      loadStats(); loadToday(); loadBotConfig(); checkCalendarStatus(); loadModules();
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('todayDatePicker').value = today;
       const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
@@ -2556,7 +2788,8 @@
     const tabTitles = {
       dashboard: 'Dashboard', today: "Today's Schedule",
       appointments: 'All Appointments', customers: 'Customers',
-      botconfig: 'Bot Configuration', calendar: 'Calendar Connect'
+      botconfig: 'Bot Configuration', calendar: 'Calendar Connect',
+      modules: 'Module Configuration', knowledge: 'Knowledge Base'
     };
     function switchTab(name) {
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -2571,6 +2804,8 @@
       if (name === 'customers') loadCustomers();
       if (name === 'today') loadAppointmentsForDate();
       if (name === 'botconfig') { refreshDynamicNames(); updateHoursVisual(); }
+      if (name === 'modules') loadModules();
+      if (name === 'knowledge') loadKnowledge();
     }
 
     // ── Config inner tabs ─────────────────────────────────────────────────────────
@@ -3029,10 +3264,8 @@ ${cfg.extra_prompt_context ? 'Additional context: ' + cfg.extra_prompt_context :
       }
     }
 
-    // ── Init ────────────────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     checkStoredLogin();
-    goWizStep(1);
   </script>
 </body>
-
 </html>

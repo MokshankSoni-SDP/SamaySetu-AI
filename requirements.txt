@@ -1,15 +1,45 @@
-fastapi
-uvicorn
-websockets
-pydantic
-python-dotenv
-langchain
-langchain-groq
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-pytz
-httpx
-sarvamai
-psycopg2-binary
-tenacity
+# ── Core web framework ────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart
+pydantic>=2.0
+
+# ── Database ───────────────────────────────────────────────────────────────────
+psycopg2-binary>=2.9
+
+# ── LLM / LangChain ───────────────────────────────────────────────────────────
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-groq>=0.1.0
+
+# ── STT / TTS (Sarvam) ────────────────────────────────────────────────────────
+sarvamai>=0.1.0
+
+# ── Retry logic ───────────────────────────────────────────────────────────────
+tenacity>=8.3.0
+
+# ── Google Calendar ────────────────────────────────────────────────────────────
+google-api-python-client>=2.125.0
+google-auth>=2.29.0
+google-auth-httplib2>=0.2.0
+
+# ── Environment ────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Timezone ──────────────────────────────────────────────────────────────────
+pytz>=2024.1
+
+# ── NEW: FACTS_MODULE — RAG dependencies ─────────────────────────────────────
+
+# Qdrant vector database client
+qdrant-client>=1.9.0
+
+# Sentence embeddings (all-MiniLM-L6-v2, 384-dim)
+sentence-transformers>=3.0.0
+
+# PyTorch CPU (required by sentence-transformers; CPU-only to keep it lightweight)
+# If you already have GPU PyTorch, skip this line
+torch>=2.0.0
+
+# Transformers (required by sentence-transformers)
+transformers>=4.40.0

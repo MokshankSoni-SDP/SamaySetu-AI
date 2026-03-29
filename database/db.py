@@ -17,17 +17,15 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# ── Database URL ────────────────────────────────────────────────────────────
-# Replace with your actual PostgreSQL credentials.
-DATABASE_URL = os.getenv(
-    "DATABASE_URL"
-)
+# ── Database URL ─────────────────────────────────────────────────────────────
+# Replace with your actual PostgreSQL credentials, or set DATABASE_URL env var.
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_db_connection():
     """
     Returns a new psycopg2 connection using DATABASE_URL.
-    Caller is responsible for closing the connection (use a context manager or try/finally).
+    Caller is responsible for closing the connection.
 
     Usage:
         conn = get_db_connection()
@@ -41,7 +39,6 @@ def get_db_connection():
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         return conn
     except psycopg2.OperationalError as e:
-        # Provide a clear error message instead of a raw psycopg2 trace
         raise ConnectionError(
             f"[DB] Could not connect to PostgreSQL.\n"
             f"Check your DATABASE_URL: {DATABASE_URL}\n"

@@ -2,16 +2,7 @@
 database/models.py
 ------------------
 Multi-tenant table definitions for SamaySetu AI.
-Supports multiple business owners (tenants), each with their own customers,
-appointments, calendar integration, and bot configuration.
-
-Tables:
-  tenants          — one row per business (doctor, salon, etc.)
-  tenant_admins    — admin login accounts linked to a tenant
-  users            — end-customers, scoped to a tenant
-  appointments     — appointments scoped to tenant + user
-  bot_configs      — per-tenant bot personality/prompt config
-  calendar_tokens  — per-tenant Google Calendar OAuth tokens
+Now includes module_configs and knowledge_base tables.
 """
 
 from database.db import get_db_connection
@@ -20,7 +11,7 @@ from database.db import get_db_connection
 def create_tables():
     stmts = [
 
-        # ── Tenants: one row = one business owner using SamaySetu ────────────
+        # ── Tenants ────────────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS tenants (
             tenant_id       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -34,7 +25,7 @@ def create_tables():
         );
         """,
 
-        # ── Tenant admins: login accounts for shop owners ─────────────────────
+        # ── Tenant admins ─────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS tenant_admins (
             admin_id        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -47,7 +38,7 @@ def create_tables():
         );
         """,
 
-        # ── Bot configs: per-tenant LLM personality and booking settings ──────
+        # ── Bot configs ────────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS bot_configs (
             config_id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,7 +59,7 @@ def create_tables():
         );
         """,
 
-        # ── Users: end-customers, always scoped to a tenant ──────────────────
+        # ── Users ──────────────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS users (
             user_id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -80,7 +71,7 @@ def create_tables():
         );
         """,
 
-        # ── Appointments: fully scoped to tenant + user ───────────────────────
+        # ── Appointments ───────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS appointments (
             appointment_id    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -96,7 +87,7 @@ def create_tables():
         );
         """,
 
-        # ── Calendar tokens: per-tenant OAuth credentials ─────────────────────
+        # ── Calendar tokens ────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS calendar_tokens (
             token_id        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,10 +99,35 @@ def create_tables():
         );
         """,
 
+        # ── NEW: Module configs — controls which modules are active per tenant ─
+        """
+        CREATE TABLE IF NOT EXISTS module_configs (
+            id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id       UUID        NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+            module_name     VARCHAR(50) NOT NULL,
+            is_enabled      BOOLEAN     NOT NULL DEFAULT FALSE,
+            created_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, module_name)
+        );
+        """,
+
+        # ── NEW: Knowledge base — raw content for FACTS_MODULE (RAG) ──────────
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+            id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id       UUID        NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+            content         TEXT        NOT NULL,
+            created_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+        );
+        """,
+
         # ── Indexes ────────────────────────────────────────────────────────────
         "CREATE INDEX IF NOT EXISTS idx_appt_tenant_phone   ON appointments (tenant_id, phone_number, start_time DESC);",
         "CREATE INDEX IF NOT EXISTS idx_appt_tenant_date    ON appointments (tenant_id, start_time);",
         "CREATE INDEX IF NOT EXISTS idx_users_tenant_phone  ON users (tenant_id, phone_number);",
+        "CREATE INDEX IF NOT EXISTS idx_module_configs_tenant ON module_configs (tenant_id, module_name);",
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_tenant    ON knowledge_base (tenant_id);",
     ]
 
     try:
@@ -121,6 +137,8 @@ def create_tables():
                 for stmt in stmts:
                     cur.execute(stmt)
             conn.commit()
+            # Seed BOOKING_MODULE as enabled by default for all existing tenants
+            _seed_default_modules(conn)
             print("[DB] All tables created / verified successfully.")
         finally:
             conn.close()
@@ -128,3 +146,23 @@ def create_tables():
         print(f"[DB] Warning: could not create tables. Database features disabled.\n{e}")
     except Exception as e:
         print(f"[DB] Unexpected error during table creation: {e}")
+
+
+def _seed_default_modules(conn):
+    """
+    Ensures every existing tenant has BOOKING_MODULE enabled by default.
+    FACTS_MODULE defaults to disabled. Safe to run multiple times (ON CONFLICT DO NOTHING).
+    """
+    sql = """
+        INSERT INTO module_configs (tenant_id, module_name, is_enabled)
+        SELECT tenant_id, 'BOOKING_MODULE', TRUE FROM tenants
+        ON CONFLICT (tenant_id, module_name) DO NOTHING;
+
+        INSERT INTO module_configs (tenant_id, module_name, is_enabled)
+        SELECT tenant_id, 'FACTS_MODULE', FALSE FROM tenants
+        ON CONFLICT (tenant_id, module_name) DO NOTHING;
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    conn.commit()
+    print("[DB] Default module configs seeded.")
