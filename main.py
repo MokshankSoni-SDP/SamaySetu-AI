@@ -50,10 +50,14 @@ try:
         get_all_tenants, create_tenant, get_platform_stats,
         update_tenant_status, create_tenant_admin, get_admin_by_email,
         save_calendar_token, get_calendar_token,
-        # Module operations
-        get_all_module_configs, set_module_enabled, get_enabled_modules,
+        # Module operations (names match updated crud.py)
+        get_module_configs_list as get_all_module_configs,
+        set_module_enabled,
+        get_tenant_modules as get_enabled_modules,
         # Knowledge base
-        add_knowledge, get_all_knowledge, delete_knowledge, delete_all_knowledge,
+        add_knowledge_chunks as add_knowledge,
+        get_knowledge_chunks as get_all_knowledge,
+        delete_all_knowledge,
     )
     DB_AVAILABLE = True
 except ImportError as _db_err:
@@ -120,10 +124,23 @@ class KnowledgeUploadRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── Database setup ─────────────────────────────────────────────────────────
     if DB_AVAILABLE:
         await asyncio.to_thread(create_tables)
     else:
         print("[DB] Skipping table creation — psycopg2 unavailable.")
+
+    # ── FIX 2: Pre-warm FACTS module (embedding model + Qdrant) ───────────────
+    # facts_module._bootstrap() already ran at import time, loading the model.
+    # This warmup call runs a dummy encode() to prime BLAS/ONNX routines so the
+    # very first real request doesn't pay the JIT warm-up cost.
+    try:
+        from modules.facts_module import warmup as warmup_facts
+        await asyncio.to_thread(warmup_facts)
+        print("[STARTUP] FACTS module warmup complete")
+    except Exception as e:
+        print(f"[STARTUP] FACTS module warmup skipped (not installed?): {e}")
+
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -525,14 +542,20 @@ async def admin_toggle_module(req: ModuleToggleRequest, session=Depends(_check_a
         raise HTTPException(status_code=400, detail=f"Unknown module: {req.module_name}. "
                             f"Valid: {ALL_MODULES}")
 
-    ok = await asyncio.to_thread(set_module_enabled, tenant_id, req.module_name, req.is_enabled)
-    if not ok:
+    result = await asyncio.to_thread(set_module_enabled, tenant_id, req.module_name, req.is_enabled)
+    if not result:
         raise HTTPException(status_code=500, detail="Failed to update module config")
 
-    # Invalidate cached module config for any live sessions of this tenant
+    # Invalidate cached module config and LLM cache for live sessions of this tenant
     for sess in chat_sessions.values():
         if sess.get("tenant_id") == tenant_id:
             sess.pop("enabled_modules", None)
+
+    # Invalidate the tools + LLM cache so the next request rebuilds with new modules
+    from brain import invalidate_llm_cache
+    from modules.module_registry import invalidate_tools_cache
+    invalidate_llm_cache(tenant_id)
+    invalidate_tools_cache(tenant_id)
 
     return {
         "module_name": req.module_name,
@@ -563,8 +586,10 @@ async def admin_add_knowledge(req: KnowledgeUploadRequest, session=Depends(_chec
     if not req.content or not req.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty")
 
-    # Save raw content to DB
-    row = await asyncio.to_thread(add_knowledge, tenant_id, req.content.strip())
+    # Save raw content to DB (add_knowledge_chunks takes a list of chunks)
+    from modules.facts_module import chunk_text as _chunk_text
+    raw_chunks = _chunk_text(req.content.strip())
+    rows_added = await asyncio.to_thread(add_knowledge, session["tenant_id"], raw_chunks)
 
     # Index into Qdrant (runs in thread to avoid blocking)
     chunks_indexed = 0
@@ -575,7 +600,7 @@ async def admin_add_knowledge(req: KnowledgeUploadRequest, session=Depends(_chec
         print(f"[FACTS] Qdrant indexing failed (content saved to DB): {e}")
 
     return {
-        "id":             row.get("id"),
+        "chunks_saved":   rows_added,
         "chunks_indexed": chunks_indexed,
         "status":         "saved"
     }

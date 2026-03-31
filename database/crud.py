@@ -1,13 +1,19 @@
 """
-database/crud.py  (multi-tenant + modular edition)
----------------------------------------------------
+database/crud.py  (multi-tenant edition + modules + knowledge_base)
+-----------------------------------------
 All DB read/write operations for SamaySetu AI.
-Now includes module_configs and knowledge_base CRUD.
+Every customer-facing operation requires a tenant_id so data is
+always isolated between different business owners.
 """
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from database.db import get_db_connection
+
+# ── Known module names ────────────────────────────────────────────────────────
+BOOKING_MODULE = "BOOKING_MODULE"
+FACTS_MODULE   = "FACTS_MODULE"
+ALL_MODULES    = [BOOKING_MODULE, FACTS_MODULE]
 
 
 def _to_dt(s):
@@ -17,7 +23,7 @@ def _to_dt(s):
 
 
 # ══════════════════════════════════════════════════════════
-#  TENANT operations
+#  TENANT operations  (SamaySetu platform-level)
 # ══════════════════════════════════════════════════════════
 
 def create_tenant(business_name: str, business_type: str, owner_email: str) -> Dict[str, Any]:
@@ -32,29 +38,32 @@ def create_tenant(business_name: str, business_type: str, owner_email: str) -> D
             cur.execute(sql, (business_name, business_type, owner_email))
             row = cur.fetchone()
             conn.commit()
-            result = _serialize(row)
-        # Seed default modules for the new tenant
-        _seed_modules_for_tenant(conn if not conn.closed else get_db_connection(), result.get("tenant_id"))
-        return result
+            tenant = _serialize(row)
+        # Seed default modules: BOOKING enabled, FACTS disabled
+        _seed_default_modules(tenant["tenant_id"])
+        return tenant
     finally:
         conn.close()
 
 
-def _seed_modules_for_tenant(conn, tenant_id: str):
-    """Seed default module configs for a new tenant."""
-    if not tenant_id:
-        return
-    sql = """
-        INSERT INTO module_configs (tenant_id, module_name, is_enabled)
-        VALUES (%s, 'BOOKING_MODULE', TRUE), (%s, 'FACTS_MODULE', FALSE)
-        ON CONFLICT (tenant_id, module_name) DO NOTHING;
-    """
+def _seed_default_modules(tenant_id: str):
+    """Insert default module rows for a new tenant (BOOKING on, FACTS off)."""
+    defaults = {BOOKING_MODULE: True, FACTS_MODULE: False}
+    conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id, tenant_id))
+            for module_name, enabled in defaults.items():
+                cur.execute(
+                    """
+                    INSERT INTO module_configs (tenant_id, module_name, is_enabled)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (tenant_id, module_name) DO NOTHING;
+                    """,
+                    (tenant_id, module_name, enabled),
+                )
         conn.commit()
-    except Exception as e:
-        print(f"[DB] Could not seed modules for tenant {tenant_id}: {e}")
+    finally:
+        conn.close()
 
 
 def get_all_tenants() -> List[Dict[str, Any]]:
@@ -100,6 +109,7 @@ def update_tenant_status(tenant_id: str, is_active: bool) -> bool:
 
 
 def get_platform_stats() -> Dict[str, Any]:
+    """High-level stats for the SamaySetu super-admin dashboard."""
     sql = """
         SELECT
             (SELECT COUNT(*) FROM tenants)                          AS total_tenants,
@@ -121,7 +131,7 @@ def get_platform_stats() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════
-#  ADMIN operations
+#  ADMIN (tenant admin) operations
 # ══════════════════════════════════════════════════════════
 
 def create_tenant_admin(tenant_id: str, email: str, password_hash: str, role: str = "admin") -> Dict[str, Any]:
@@ -175,6 +185,7 @@ def get_bot_config(tenant_id: str) -> Optional[Dict[str, Any]]:
 
 
 def upsert_bot_config(tenant_id: str, **fields) -> Dict[str, Any]:
+    """Insert or update bot configuration for a tenant."""
     allowed = {
         "bot_name", "receptionist_name", "language_code", "tts_speaker",
         "business_hours_start", "business_hours_end", "slot_duration_mins",
@@ -207,97 +218,83 @@ def upsert_bot_config(tenant_id: str, **fields) -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════
-#  MODULE CONFIG operations  (NEW)
+#  MODULE CONFIG operations
 # ══════════════════════════════════════════════════════════
 
-def get_enabled_modules(tenant_id: str) -> List[str]:
-    """Returns list of enabled module names for a tenant."""
+def get_tenant_modules(tenant_id: str) -> Dict[str, bool]:
+    """
+    Returns a dict of {module_name: is_enabled} for the tenant.
+    Used internally by brain.py / module_registry.
+    Missing rows are backfilled with safe defaults (BOOKING=True, FACTS=False).
+    """
+    sql = "SELECT module_name, is_enabled FROM module_configs WHERE tenant_id = %s;"
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (tenant_id,))
+            rows = cur.fetchall()
+        result = {BOOKING_MODULE: True, FACTS_MODULE: False}   # safe defaults
+        for row in rows:
+            result[row["module_name"]] = row["is_enabled"]
+        return result
+    finally:
+        conn.close()
+
+
+def get_module_configs_list(tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    Returns module configs as a LIST for the admin panel API.
+    Shape: [{"module_name": "BOOKING_MODULE", "is_enabled": true}, ...]
+    Always returns both known modules (seeds defaults if rows missing).
+    This is what fixes the 'modules.map is not a function' frontend error.
+    """
+    # Ensure rows exist for all known modules (idempotent, safe to call repeatedly)
+    _seed_module_defaults_for_tenant(tenant_id)
     sql = """
-        SELECT module_name FROM module_configs
-        WHERE tenant_id = %s AND is_enabled = true;
+        SELECT module_name, is_enabled, updated_at
+        FROM module_configs
+        WHERE tenant_id = %s
+        ORDER BY module_name ASC;
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(sql, (tenant_id,))
             rows = cur.fetchall()
-            return [r["module_name"] for r in rows]
+        return [_serialize(r) for r in rows]
     finally:
         conn.close()
 
 
-def get_all_module_configs(tenant_id: str) -> List[Dict[str, Any]]:
-    """Returns all module configs (enabled or not) for a tenant."""
+def _seed_module_defaults_for_tenant(tenant_id: str):
+    """Idempotently ensure BOOKING_MODULE and FACTS_MODULE rows exist for this tenant."""
     sql = """
-        SELECT module_name, is_enabled, updated_at
-        FROM module_configs
-        WHERE tenant_id = %s
-        ORDER BY module_name;
+        INSERT INTO module_configs (tenant_id, module_name, is_enabled)
+        VALUES (%s, 'BOOKING_MODULE', TRUE), (%s, 'FACTS_MODULE', FALSE)
+        ON CONFLICT (tenant_id, module_name) DO NOTHING;
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id,))
-            return [_serialize(r) for r in cur.fetchall()]
+            cur.execute(sql, (tenant_id, tenant_id))
+        conn.commit()
     finally:
         conn.close()
 
 
-def set_module_enabled(tenant_id: str, module_name: str, is_enabled: bool) -> bool:
-    """Enable or disable a module for a tenant. Creates the row if it doesn't exist."""
+def set_module_enabled(tenant_id: str, module_name: str, is_enabled: bool) -> Dict[str, Any]:
+    """Enable or disable a module for a tenant (upsert)."""
     sql = """
-        INSERT INTO module_configs (tenant_id, module_name, is_enabled, updated_at)
-        VALUES (%s, %s, %s, NOW())
+        INSERT INTO module_configs (tenant_id, module_name, is_enabled)
+        VALUES (%s, %s, %s)
         ON CONFLICT (tenant_id, module_name)
-        DO UPDATE SET is_enabled = EXCLUDED.is_enabled, updated_at = NOW();
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id, module_name, is_enabled))
-            conn.commit()
-            return True
-    except Exception as e:
-        print(f"[DB] set_module_enabled error: {e}")
-        return False
-    finally:
-        conn.close()
-
-
-def is_module_enabled(tenant_id: str, module_name: str) -> bool:
-    """Quick check if a specific module is enabled."""
-    sql = """
-        SELECT is_enabled FROM module_configs
-        WHERE tenant_id = %s AND module_name = %s;
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id, module_name))
-            row = cur.fetchone()
-            # Default: BOOKING_MODULE enabled, others disabled
-            if row is None:
-                return module_name == "BOOKING_MODULE"
-            return row["is_enabled"]
-    finally:
-        conn.close()
-
-
-# ══════════════════════════════════════════════════════════
-#  KNOWLEDGE BASE operations  (NEW — for FACTS_MODULE)
-# ══════════════════════════════════════════════════════════
-
-def add_knowledge(tenant_id: str, content: str) -> Dict[str, Any]:
-    """Insert a knowledge entry for a tenant."""
-    sql = """
-        INSERT INTO knowledge_base (tenant_id, content)
-        VALUES (%s, %s)
+        DO UPDATE SET is_enabled = EXCLUDED.is_enabled, updated_at = NOW()
         RETURNING *;
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id, content))
+            cur.execute(sql, (tenant_id, module_name, is_enabled))
             row = cur.fetchone()
             conn.commit()
             return _serialize(row)
@@ -305,9 +302,30 @@ def add_knowledge(tenant_id: str, content: str) -> Dict[str, Any]:
         conn.close()
 
 
-def get_all_knowledge(tenant_id: str) -> List[Dict[str, Any]]:
-    """Get all knowledge entries for a tenant."""
-    sql = "SELECT * FROM knowledge_base WHERE tenant_id = %s ORDER BY created_at DESC;"
+# ══════════════════════════════════════════════════════════
+#  KNOWLEDGE BASE operations  (FACTS_MODULE)
+# ══════════════════════════════════════════════════════════
+
+def add_knowledge_chunks(tenant_id: str, chunks: List[str]) -> int:
+    """Insert text chunks into knowledge_base. Returns count inserted."""
+    sql = """
+        INSERT INTO knowledge_base (tenant_id, content)
+        VALUES (%s, %s);
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            for chunk in chunks:
+                cur.execute(sql, (tenant_id, chunk.strip()))
+        conn.commit()
+        return len(chunks)
+    finally:
+        conn.close()
+
+
+def get_knowledge_chunks(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return all knowledge chunks for a tenant (used for admin preview)."""
+    sql = "SELECT * FROM knowledge_base WHERE tenant_id = %s ORDER BY created_at ASC;"
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -317,22 +335,8 @@ def get_all_knowledge(tenant_id: str) -> List[Dict[str, Any]]:
         conn.close()
 
 
-def delete_knowledge(knowledge_id: str, tenant_id: str) -> bool:
-    """Delete a knowledge entry (tenant-scoped for safety)."""
-    sql = "DELETE FROM knowledge_base WHERE id = %s AND tenant_id = %s;"
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, (knowledge_id, tenant_id))
-            deleted = cur.rowcount > 0
-            conn.commit()
-            return deleted
-    finally:
-        conn.close()
-
-
 def delete_all_knowledge(tenant_id: str) -> int:
-    """Delete all knowledge entries for a tenant. Returns count deleted."""
+    """Delete all knowledge chunks for a tenant. Returns rows deleted."""
     sql = "DELETE FROM knowledge_base WHERE tenant_id = %s;"
     conn = get_db_connection()
     try:
@@ -346,7 +350,7 @@ def delete_all_knowledge(tenant_id: str) -> int:
 
 
 # ══════════════════════════════════════════════════════════
-#  USER operations (tenant-scoped)
+#  USER operations  (tenant-scoped)
 # ══════════════════════════════════════════════════════════
 
 def create_user_if_not_exists(phone_number: str, name: Optional[str] = None,
@@ -387,11 +391,11 @@ def get_user_appointments(phone_number: str, tenant_id: Optional[str] = None) ->
         sql = """
             SELECT * FROM appointments
             WHERE tenant_id = %s AND phone_number = %s
-            ORDER BY start_time DESC LIMIT 20;
+            ORDER BY start_time DESC;
         """
         params = (tenant_id, phone_number)
     else:
-        sql = "SELECT * FROM appointments WHERE phone_number = %s ORDER BY start_time DESC LIMIT 20;"
+        sql = "SELECT * FROM appointments WHERE phone_number = %s ORDER BY start_time DESC;"
         params = (phone_number,)
 
     conn = get_db_connection()
@@ -404,12 +408,43 @@ def get_user_appointments(phone_number: str, tenant_id: Optional[str] = None) ->
 
 
 def get_tenant_users(tenant_id: str) -> List[Dict[str, Any]]:
-    sql = "SELECT * FROM users WHERE tenant_id = %s ORDER BY created_at DESC;"
+    sql = """
+        SELECT u.*, COUNT(a.appointment_id) AS appointment_count
+        FROM users u
+        LEFT JOIN appointments a ON a.tenant_id = u.tenant_id AND a.phone_number = u.phone_number
+        WHERE u.tenant_id = %s
+        GROUP BY u.user_id
+        ORDER BY u.created_at DESC;
+    """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(sql, (tenant_id,))
             return [_serialize(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+# ══════════════════════════════════════════════════════════
+#  APPOINTMENT operations  (tenant-scoped)
+# ══════════════════════════════════════════════════════════
+
+def create_appointment(phone_number: str, start_time: str, end_time: str,
+                        calendar_event_id: str, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    sql = """
+        INSERT INTO appointments
+            (tenant_id, phone_number, start_time, end_time, calendar_event_id)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING *;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (tenant_id, phone_number,
+                              _to_dt(start_time), _to_dt(end_time), calendar_event_id))
+            row = cur.fetchone()
+            conn.commit()
+            return _serialize(row)
     finally:
         conn.close()
 
@@ -466,28 +501,6 @@ def get_tenant_stats(tenant_id: str) -> Dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute(sql, (tenant_id,))
             return _serialize(cur.fetchone())
-    finally:
-        conn.close()
-
-
-# ══════════════════════════════════════════════════════════
-#  APPOINTMENT operations
-# ══════════════════════════════════════════════════════════
-
-def create_appointment(phone_number: str, start_time: str, end_time: str,
-                        calendar_event_id: str, tenant_id: Optional[str] = None) -> Dict[str, Any]:
-    sql = """
-        INSERT INTO appointments (tenant_id, phone_number, start_time, end_time, calendar_event_id)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING *;
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, (tenant_id, phone_number, _to_dt(start_time), _to_dt(end_time), calendar_event_id))
-            row = cur.fetchone()
-            conn.commit()
-            return _serialize(row)
     finally:
         conn.close()
 
@@ -665,12 +678,63 @@ def _validate_status(status: str):
 
 
 def _serialize(row) -> Dict[str, Any]:
+    """Convert a psycopg2 RealDictRow to a plain dict, stringifying UUIDs & datetimes."""
     if row is None:
         return {}
     r = dict(row)
     for k, v in r.items():
-        if hasattr(v, 'isoformat'):
+        if hasattr(v, 'isoformat'):   # datetime / date
             r[k] = v.isoformat()
-        elif hasattr(v, 'hex'):
+        elif hasattr(v, 'hex'):       # UUID
             r[k] = str(v)
     return r
+
+
+# ══════════════════════════════════════════════════════════
+#  SINGLE-ENTRY knowledge helpers (used by admin endpoints)
+# ══════════════════════════════════════════════════════════
+
+def add_knowledge(tenant_id: str, chunks_or_text) -> int:
+    """
+    Flexible helper: accepts either a list[str] (chunks) or a raw str (single entry).
+    Returns count of rows inserted.
+    """
+    if isinstance(chunks_or_text, str):
+        chunks = [chunks_or_text]
+    else:
+        chunks = list(chunks_or_text)
+    return add_knowledge_chunks(tenant_id, chunks)
+
+
+def get_all_knowledge(tenant_id: str):
+    """Alias for get_knowledge_chunks."""
+    return get_knowledge_chunks(tenant_id)
+
+
+def delete_knowledge(knowledge_id: str, tenant_id: str) -> bool:
+    """Delete a single knowledge entry by id."""
+    sql = "DELETE FROM knowledge_base WHERE id = %s AND tenant_id = %s;"
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (knowledge_id, tenant_id))
+            deleted = cur.rowcount > 0
+            conn.commit()
+            return deleted
+    finally:
+        conn.close()
+
+
+def get_all_module_configs(tenant_id: str) -> list:
+    """
+    Returns module configs as a LIST of dicts for the admin panel API.
+    Always returns a list — fixes the 'modules.map is not a function' JS error.
+    Delegates to get_module_configs_list() which reads directly from module_configs table.
+    """
+    return get_module_configs_list(tenant_id)
+
+
+def get_enabled_modules(tenant_id: str) -> list:
+    """Returns list of enabled module name strings."""
+    modules_dict = get_tenant_modules(tenant_id)
+    return [name for name, on in modules_dict.items() if on]

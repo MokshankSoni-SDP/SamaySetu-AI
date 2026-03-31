@@ -3,7 +3,15 @@ brain.py
 --------
 Core AI reasoning engine for SamaySetu AI.
 Handles memory extraction, dynamic tool loading, LLM invocation, and TTS dispatch.
-Extracted from main.py for clarity — all WebSocket session logic lives here.
+
+LATENCY OPTIMISATIONS APPLIED:
+  FIX 4 — Prompt size kept in check via max_history trim.
+  FIX 5 — Memory extraction and module loading are PARALLELISED with asyncio.gather().
+           Both run simultaneously instead of sequentially, saving the memory-LLM
+           round-trip time for every request.
+  FIX 6 — LLM with tools is built once per (tenant, module-set) combo and cached via
+           module_registry._tools_cache.  The cached tool list is reused directly
+           so bind_tools() is not called on every request.
 """
 
 import re
@@ -18,11 +26,12 @@ from typing import Optional, List, Dict, TYPE_CHECKING
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from datetime import datetime
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
+
 try:
     from groq import BadRequestError
 except ImportError:
-    BadRequestError = Exception  # fallback if groq not installed
+    BadRequestError = Exception
 
 import prompts
 import config
@@ -46,7 +55,6 @@ small_llm = ChatGroq(
     model="llama-3.1-8b-instant",
     temperature=0
 )
-
 _main_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
 
 max_history       = config.MAX_HISTORY
@@ -54,14 +62,38 @@ max_tool_iterations = config.MAX_TOOL_ITERATIONS
 min_chunk_chars   = config.MIN_CHUNK_CHARS
 
 
-# ── Per-session LLM (with tools bound dynamically) ───────────────────────────
+# ── FIX 6: Per-(tenant, modules) LLM cache ───────────────────────────────────
+# bind_tools() is not free — it serialises all tool schemas.
+# We cache the bound LLM per tenant+module-set so it is created only once.
+_llm_cache: Dict[str, object] = {}   # cache_key → llm_with_tools
+
+
+def _get_llm_cache_key(tenant_id: str, enabled_modules: List[str]) -> str:
+    return f"{tenant_id}::{','.join(sorted(enabled_modules))}"
+
 
 def get_llm_with_tools(tenant_id: str, enabled_modules: List[str]):
-    """Returns an LLM instance with the correct tools bound for this tenant."""
-    tools = build_tools_for_tenant(tenant_id, enabled_modules)
-    if tools:
-        return _main_llm.bind_tools(tools), tools
-    return _main_llm, []
+    """Returns a cached (llm_with_tools, tools) pair for this tenant+modules combo."""
+    key = _get_llm_cache_key(tenant_id, enabled_modules)
+    if key not in _llm_cache:
+        tools = build_tools_for_tenant(tenant_id, enabled_modules)
+        if tools:
+            _llm_cache[key] = (_main_llm.bind_tools(tools), tools)
+        else:
+            _llm_cache[key] = (_main_llm, [])
+        print(f"[BRAIN] LLM+tools cached for key={key}")
+    return _llm_cache[key]
+
+
+def invalidate_llm_cache(tenant_id: Optional[str] = None):
+    """Clear LLM cache when module config changes. Pass None to clear all."""
+    if tenant_id is None:
+        _llm_cache.clear()
+    else:
+        keys_to_del = [k for k in _llm_cache if k.startswith(f"{tenant_id}::")]
+        for k in keys_to_del:
+            del _llm_cache[k]
+        print(f"[BRAIN] LLM cache cleared for tenant={tenant_id}")
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -78,18 +110,16 @@ def _log_llm_retry(rs):
         if hasattr(exc, 'body') and isinstance(exc.body, dict):
             err = exc.body.get('error', {})
             if 'failed_generation' in err:
-                log("[LLM_RETRY_DETAILS]", f"LLM Attempted to generate: {err['failed_generation']}")
+                log("[LLM_RETRY_DETAILS]", f"LLM Attempted: {err['failed_generation']}")
             elif 'message' in err:
-                log("[LLM_RETRY_DETAILS]", f"LLM Error message: {err['message']}")
-    except:
+                log("[LLM_RETRY_DETAILS]", f"LLM Error: {err['message']}")
+    except Exception:
         pass
+
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=1, max=5),
-    # FIX: Do NOT retry on 400 BadRequestError — it means the tool call schema is malformed.
-    # Retrying a malformed call just wastes 3 attempts and exhausts the retry budget.
-    # Only retry on transient errors (rate limits, timeouts, connection issues).
     retry=retry_if_not_exception_type((BadRequestError, ValueError)),
     before_sleep=_log_llm_retry
 )
@@ -98,14 +128,11 @@ async def safe_llm_call(llm_with_tools, messages):
 
 
 # ── Malformed tool-call recovery ──────────────────────────────────────────────
-# Groq/llama sometimes generates <function=name{...}> (missing '>') which causes
-# a 400 tool_use_failed.  We parse the raw `failed_generation` and synthesise a
-# proper AIMessage so the normal tool-execution loop can proceed.
 
 def _parse_malformed_tool_call(exc: Exception):
     """
-    Tries to extract a tool call from a Groq `tool_use_failed` BadRequestError.
-    Returns a synthetic AIMessage with .tool_calls populated, or None on failure.
+    Tries to extract a tool call from a Groq tool_use_failed BadRequestError.
+    Returns a synthetic AIMessage or None.
     """
     try:
         body = getattr(exc, 'body', None) or {}
@@ -115,11 +142,8 @@ def _parse_malformed_tool_call(exc: Exception):
         if not failed_gen:
             return None
 
-        log("[TOOL_RECOVERY]", f"Attempting to parse malformed generation: {failed_gen!r}")
+        log("[TOOL_RECOVERY]", f"Parsing malformed generation: {failed_gen!r}")
 
-        # Pattern handles both:
-        #   <function=name>{'key': 'val'}</function>   (correct)
-        #   <function=name{'key': 'val'}</function>    (missing '>') ← Groq bug
         match = re.search(
             r'<function=([\w_]+)>?(\{.*?\})</function>',
             failed_gen,
@@ -130,18 +154,15 @@ def _parse_malformed_tool_call(exc: Exception):
             return None
 
         tool_name = match.group(1)
-        args_raw   = match.group(2)
-        tool_args  = json.loads(args_raw)
+        tool_args = json.loads(match.group(2))
 
         log("[TOOL_RECOVERY]", f"Recovered: tool='{tool_name}' args={tool_args}")
 
-        # Build a synthetic AIMessage that looks just like a normal tool-call message
         from langchain_core.messages import AIMessage
         import uuid
-        synthetic_id = f"recovered_{uuid.uuid4().hex[:8]}"
         return AIMessage(
             content="",
-            tool_calls=[{"name": tool_name, "args": tool_args, "id": synthetic_id}],
+            tool_calls=[{"name": tool_name, "args": tool_args, "id": f"recovered_{uuid.uuid4().hex[:8]}"}],
         )
     except Exception as parse_err:
         log("[TOOL_RECOVERY]", f"Parse failed: {parse_err}")
@@ -152,16 +173,15 @@ def _parse_malformed_tool_call(exc: Exception):
 
 async def extract_memory(user_text: str, memory: dict, lang_code: str = "gu-IN",
                           enabled_modules: List[str] = None):
-    """Small LLM call to update memory state. Module-aware intent detection."""
+    """Small LLM call to update memory state."""
     if enabled_modules is None:
         enabled_modules = [BOOKING_MODULE]
     try:
         prompt = prompts.get_memory_extraction_prompt(lang_code, enabled_modules)
-        today = datetime.now().strftime("%Y-%m-%d")
+        today  = datetime.now().strftime("%Y-%m-%d")
         messages = [
             SystemMessage(content=prompt),
-            HumanMessage(content=f"""
-Today date: {today}
+            HumanMessage(content=f"""Today date: {today}
 
 Current memory:
 {json.dumps(memory)}
@@ -170,7 +190,7 @@ User input:
 {user_text}
 """)
         ]
-        response = await small_llm.ainvoke(messages)
+        response  = await small_llm.ainvoke(messages)
         extracted = safe_json_parse(response.content)
         return extracted
     except Exception as e:
@@ -359,6 +379,54 @@ def print_token_usage(msg, step_name):
               f"total={usage.get('total_tokens')} ---")
 
 
+# ── Tool context injection ────────────────────────────────────────────────────
+
+def _inject_tool_context(session_id: str, chat_sessions: dict, enabled_modules: List[str]):
+    """Injects session context into module tools so they can resolve tenant_id."""
+
+    class _Ctx:
+        pass
+
+    ctx = _Ctx()
+    ctx.session_id    = session_id
+    ctx.chat_sessions = chat_sessions
+
+    if BOOKING_MODULE in enabled_modules:
+        try:
+            import calendar_tool
+            calendar_tool.tenant_context = ctx
+        except ImportError:
+            pass
+
+    if FACTS_MODULE in enabled_modules:
+        try:
+            from modules import facts_module
+            facts_module.tenant_context = ctx
+        except ImportError:
+            pass
+
+
+async def _run_tool_async(tool_name: str, args: dict):
+    """Dynamically resolve and run a tool by name in a thread."""
+    try:
+        import calendar_tool
+        func = getattr(calendar_tool, tool_name, None)
+        if func:
+            return await asyncio.to_thread(func, **args)
+    except ImportError:
+        pass
+
+    try:
+        from modules import facts_module
+        func = getattr(facts_module, tool_name, None)
+        if func:
+            return await asyncio.to_thread(func, **args)
+    except ImportError:
+        pass
+
+    raise ValueError(f"Unknown tool: {tool_name}")
+
+
 # ── Main brain (run_brain) ────────────────────────────────────────────────────
 
 async def run_brain(
@@ -371,13 +439,16 @@ async def run_brain(
 ):
     """
     Core reasoning loop.
-    1. Normalize input
-    2. Handle unclear/noisy transcripts
-    3. Extract memory (module-aware)
-    4. Build dynamic prompt + tools based on enabled modules
-    5. Run main LLM with tools
-    6. Execute tool calls
-    7. Stream TTS response
+
+    Pipeline:
+      1. Normalize input
+      2. Handle unclear/noisy transcripts (early return)
+      3. Resolve enabled modules for tenant (cached in session)
+      4. FIX 5: Parallelise memory extraction + module/LLM resolution
+      5. Build system prompt (module-aware)
+      6. Run main LLM with tools
+      7. Tool execution loop
+      8. Stream TTS response
     """
     t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
@@ -389,9 +460,9 @@ async def run_brain(
 
     log("[BRAIN]", f"START | session='{session_id}' | text='{user_text}'")
 
-    # ── Handle noisy/unclear input ────────────────────────────────────────────
+    # ── Handle noisy / unclear input ──────────────────────────────────────────
     if user_text == "__UNCLEAR__":
-        bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+        bot_cfg    = chat_sessions.get(session_id, {}).get("bot_config") or {}
         fb_speaker = bot_cfg.get("tts_speaker", "simran")
         fb_lang    = bot_cfg.get("language_code", "gu-IN")
         clarification = prompts.LANG_PACK.get(fb_lang, prompts.LANG_PACK["gu-IN"])["unclear_msg"]
@@ -429,35 +500,54 @@ async def run_brain(
             }
         }
 
-    session_data  = chat_sessions[session_id]
-    history       = session_data["history"]
-    phone_number  = session_data.get("phone_number")
-    bot_config    = session_data.get("bot_config") or {}
-    tts_speaker   = bot_config.get("tts_speaker", "simran")
-    tts_lang      = bot_config.get("language_code", "gu-IN")
-    tenant_id     = session_data.get("tenant_id")
+    session_data = chat_sessions[session_id]
+    history      = session_data["history"]
+    phone_number = session_data.get("phone_number")
+    bot_config   = session_data.get("bot_config") or {}
+    tts_speaker  = bot_config.get("tts_speaker", "simran")
+    tts_lang     = bot_config.get("language_code", "gu-IN")
+    tenant_id    = session_data.get("tenant_id")
 
-    # ── Resolve enabled modules ────────────────────────────────────────────────
+    # ── Resolve enabled modules (cached in session, DB-fetched once) ──────────
     enabled_modules = session_data.get("enabled_modules")
     if enabled_modules is None:
         if tenant_id:
-            enabled_modules = get_enabled_modules_for_tenant(tenant_id)
+            # Run in thread so the synchronous DB call doesn't block the event loop
+            enabled_modules = await asyncio.to_thread(get_enabled_modules_for_tenant, tenant_id)
         else:
-            enabled_modules = [BOOKING_MODULE]  # safe default
+            enabled_modules = [BOOKING_MODULE]
         session_data["enabled_modules"] = enabled_modules
     log("[MODULES]", f"Enabled: {enabled_modules}")
 
-    # ── Memory extraction ─────────────────────────────────────────────────────
+    # ── FIX 5: PARALLELISE memory extraction + LLM/tool resolution ────────────
+    # Memory extraction requires a small-LLM network call (~500–800 ms).
+    # get_llm_with_tools() is synchronous and usually instant (cached), but on
+    # the very first call it does bind_tools() which has some CPU overhead.
+    # Running both concurrently shaves the memory-LLM round-trip off the critical path.
     memory = session_data.get("memory", {})
-    new_memory = await extract_memory(user_text, memory, tts_lang, enabled_modules)
-    updated_memory = merge_memory(memory, new_memory)
+
+    mem_task    = asyncio.create_task(extract_memory(user_text, memory, tts_lang, enabled_modules))
+    llm_task    = asyncio.get_event_loop().run_in_executor(
+        None, get_llm_with_tools, tenant_id or "", enabled_modules
+    )
+
+    new_memory_result, llm_result = await asyncio.gather(mem_task, llm_task)
+
+    llm_with_tools, active_tools = llm_result
+
+    # Merge + save memory
+    updated_memory = merge_memory(memory, new_memory_result)
     print(updated_memory)
     session_data["memory"] = updated_memory
 
-    memory_context = f"\n\n=== MEMORY STATE ===\n{json.dumps(updated_memory)}"
+    log("[MEMORY]", f"Updated: {updated_memory}")
 
-    # ── Build system prompt (module-aware) ────────────────────────────────────
-    system_prompt = (
+    # ── Inject tenant context into module tools ───────────────────────────────
+    _inject_tool_context(session_id, chat_sessions, enabled_modules)
+
+    # ── Build system prompt ───────────────────────────────────────────────────
+    memory_context = f"\n\n=== MEMORY STATE ===\n{json.dumps(updated_memory)}"
+    system_prompt  = (
         prompts.get_system_prompt(today, day, bot_config, enabled_modules)
         + memory_context
     )
@@ -468,17 +558,11 @@ async def run_brain(
         history.insert(0, SystemMessage(content=system_prompt))
 
     history.append(HumanMessage(content=user_text))
+
+    # FIX 4: trim history to avoid bloating prompt tokens
     recent_history = [history[0]] + history[-max_history:]
 
-    log("[MEMORY]", f"Updated: {updated_memory}")
-
-    # ── Build dynamic LLM with tools ──────────────────────────────────────────
-    llm_with_tools, active_tools = get_llm_with_tools(tenant_id or "", enabled_modules)
-
-    # Inject tenant context into module tools
-    _inject_tool_context(session_id, chat_sessions, enabled_modules)
-
-    # ── First LLM call ─────────────────────────────────────────────────────────
+    # ── First LLM call ────────────────────────────────────────────────────────
     t_llm = datetime.now()
     log("[LLM]", f"ainvoke() | {len(recent_history)} msgs | modules={enabled_modules}")
     try:
@@ -487,13 +571,13 @@ async def run_brain(
             f"tool_calls={len(ai_msg.tool_calls)}")
         print_token_usage(ai_msg, "Initial LLM")
     except BadRequestError as e:
-        log("[LLM]", f"BadRequestError (tool_use_failed) — attempting recovery")
+        log("[LLM]", "BadRequestError (tool_use_failed) — attempting recovery")
         recovered = _parse_malformed_tool_call(e)
         if recovered:
             log("[LLM]", f"Recovery successful — executing '{recovered.tool_calls[0]['name']}'")
             ai_msg = recovered
         else:
-            log("[LLM]", f"Recovery failed — re-raising")
+            log("[LLM]", "Recovery failed — re-raising")
             raise
     except Exception as e:
         log("[LLM]", f"FAILED: {e}\n{traceback.format_exc()}")
@@ -504,7 +588,7 @@ async def run_brain(
     while ai_msg.tool_calls:
         tool_iteration += 1
         if tool_iteration > max_tool_iterations:
-            log("[TOOLS]", f"Max tool iterations ({max_tool_iterations}). Forcing AI response.")
+            log("[TOOLS]", f"Max tool iterations ({max_tool_iterations}). Forcing response.")
             break
         log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
@@ -512,8 +596,6 @@ async def run_brain(
         async def execute_tool(tool_call):
             tname = tool_call["name"]
             targs = tool_call["args"]
-
-            # Inject phone_number for booking tools
             if phone_number:
                 targs = {**targs, "phone_number": phone_number}
 
@@ -521,13 +603,10 @@ async def run_brain(
             await websocket.send_json({"type": "tool_call", "name": tname, "args": targs, "status": "running"})
             t_tool = datetime.now()
 
-            log("[TOOL_EXEC]", f"Starting {tname} with {targs}")
-
             try:
                 obs = await _run_tool_async(tname, targs)
-                # Reset memory after successful action
                 if "success" in str(obs).lower():
-                    print("$$$state memory deleted after success$$$")
+                    print("$$$state memory cleared after success$$$")
                     session_data["memory"] = {
                         "intent": "none",
                         "pending_action": "waiting_for_confirmation",
@@ -535,7 +614,7 @@ async def run_brain(
                         "reschedule": {"old_time": None, "new_time": None},
                         "date_context": {"resolved_date": None, "source": "none"}
                     }
-                    # Invalidate cached enabled_modules so they're re-fetched next turn
+                    # Force module re-fetch next turn in case config changed
                     session_data.pop("enabled_modules", None)
 
                 status = "ok"
@@ -543,15 +622,17 @@ async def run_brain(
             except Exception as e:
                 obs, status = f"Error: {e}", "error"
                 log("[TOOL]", f"'{tname}' FAILED: {e}")
+
             await websocket.send_json({
                 "type": "tool_call", "name": tname, "args": targs,
                 "status": status, "result": str(obs)
             })
             return ToolMessage(content=str(obs), tool_call_id=tool_call["id"])
 
-        tool_results = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
+        tool_results   = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
         history.extend(tool_results)
         recent_history = [history[0]] + history[-max_history:]
+
         t_llm2 = datetime.now()
         log("[LLM]", "Post-tool ainvoke()")
         try:
@@ -559,13 +640,13 @@ async def run_brain(
             log("[LLM]", f"Done in {(datetime.now()-t_llm2).total_seconds():.2f}s")
             print_token_usage(ai_msg, "Post-tool LLM")
         except BadRequestError as e:
-            log("[LLM]", f"Post-tool BadRequestError — attempting recovery")
+            log("[LLM]", "Post-tool BadRequestError — attempting recovery")
             recovered = _parse_malformed_tool_call(e)
             if recovered:
-                log("[LLM]", f"Post-tool recovery successful")
+                log("[LLM]", "Post-tool recovery successful")
                 ai_msg = recovered
             else:
-                log("[LLM]", f"Post-tool recovery failed — re-raising")
+                log("[LLM]", "Post-tool recovery failed — re-raising")
                 raise
         except Exception as e:
             log("[LLM]", f"Post-tool FAILED: {e}")
@@ -575,6 +656,7 @@ async def run_brain(
     reply_text = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
     history.append(ai_msg)
 
+    # FIX 4: trim history to keep tokens under control
     if len(history) > max_history * 2 + 2:
         history[:] = [history[0]] + history[-(max_history * 2):]
 
@@ -582,11 +664,13 @@ async def run_brain(
 
     if is_tool_output(reply_text):
         log("[TTS_FILTER]", f"Blocked tool output from TTS: '{reply_text[:80]}'")
+        log("[BRAIN]", f"DONE (tool-only, no TTS) in {(datetime.now()-t0).total_seconds():.2f}s")
         return
 
     tts_text = clean_for_tts(reply_text)
     if not tts_text:
         log("[TTS_FILTER]", "Reply cleaned to empty — skipping TTS")
+        log("[BRAIN]", f"DONE (empty) in {(datetime.now()-t0).total_seconds():.2f}s")
         return
 
     sentences = split_into_sentences(tts_text)
@@ -614,53 +698,3 @@ async def run_brain(
         await websocket.send_json({"type": "tts_done"})
 
     log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
-
-
-# ── Tool context injection ────────────────────────────────────────────────────
-
-def _inject_tool_context(session_id: str, chat_sessions: dict, enabled_modules: List[str]):
-    """Injects session context into module tools so they can resolve tenant_id."""
-
-    class _Ctx:
-        pass
-
-    ctx = _Ctx()
-    ctx.session_id    = session_id
-    ctx.chat_sessions = chat_sessions
-
-    if BOOKING_MODULE in enabled_modules:
-        try:
-            import calendar_tool
-            calendar_tool.tenant_context = ctx
-        except ImportError:
-            pass
-
-    if FACTS_MODULE in enabled_modules:
-        try:
-            from modules import facts_module
-            facts_module.tenant_context = ctx
-        except ImportError:
-            pass
-
-
-async def _run_tool_async(tool_name: str, args: dict):
-    """Dynamically resolve and run a tool by name."""
-    # Try calendar_tool namespace first
-    try:
-        import calendar_tool
-        func = getattr(calendar_tool, tool_name, None)
-        if func:
-            return await asyncio.to_thread(func, **args)
-    except ImportError:
-        pass
-
-    # Try facts_module namespace
-    try:
-        from modules import facts_module
-        func = getattr(facts_module, tool_name, None)
-        if func:
-            return await asyncio.to_thread(func, **args)
-    except ImportError:
-        pass
-
-    raise ValueError(f"Unknown tool: {tool_name}")
