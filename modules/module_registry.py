@@ -79,10 +79,13 @@ def get_enabled_modules_for_tenant(tenant_id: str) -> List[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GetFactsInput(BaseModel):
-    # Only 'query' exposed to the LLM.
-    # phone_number is injected by brain.py BEFORE the function call.
-    # Including it here caused Groq to emit malformed function call syntax.
+    # 'query' is the only field exposed to the LLM via its description.
+    # 'phone_number' is NOT shown to the LLM but MUST be in the schema because
+    # brain.py injects it into args before the tool is called.  Without it here,
+    # StructuredTool's Pydantic validation rejects the extra kwarg and Groq
+    # reports a tool_use_failed BadRequestError.
     query: str
+    phone_number: Optional[str] = None
 
 
 def _wrap(func, name: str, description: str):

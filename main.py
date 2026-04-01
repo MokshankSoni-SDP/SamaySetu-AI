@@ -58,6 +58,7 @@ try:
         add_knowledge_chunks as add_knowledge,
         get_knowledge_chunks as get_all_knowledge,
         delete_all_knowledge,
+        delete_knowledge,
     )
     DB_AVAILABLE = True
 except ImportError as _db_err:

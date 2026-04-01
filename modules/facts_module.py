@@ -143,32 +143,82 @@ def warmup():
 # Chunking
 # ─────────────────────────────────────────────────────────────────────────────
 
-def chunk_text(text: str, min_words: int = 20, max_words: int = 30) -> List[str]:
-    """
-    Splits raw text into chunks of 20–30 words.
-    Tries to break at sentence boundaries first, then falls back to word count.
-    """
-    sentences = re.split(r'(?<=[.!?।\u0964])\s+', text.strip())
-    chunks: List[str] = []
-    buffer_words: List[str] = []
+def is_heading(line: str) -> bool:
+    line = line.strip()
 
-    for sentence in sentences:
-        words = sentence.split()
-        for word in words:
-            buffer_words.append(word)
-            if len(buffer_words) >= max_words:
-                chunks.append(" ".join(buffer_words))
-                buffer_words = []
+    if not line or len(line.split()) > 10:
+        return False
 
-    if buffer_words:
-        if len(buffer_words) >= min_words or not chunks:
-            chunks.append(" ".join(buffer_words))
-        elif chunks:
-            chunks[-1] += " " + " ".join(buffer_words)
+    # Ends with colon OR looks like title
+    if line.endswith(":"):
+        return True
+
+    # Title case heuristic
+    if line.istitle():
+        return True
+
+    # Keyword-based detection
+    keywords = [
+        "address", "location", "timing", "hours", "doctor",
+        "services", "charges", "fees", "overview",
+        "facilities", "contact", "clinic"
+    ]
+
+    lower = line.lower()
+    if any(k in lower for k in keywords):
+        return True
+
+    return False
+
+
+def chunk_text(text: str, max_words: int = 120) -> List[str]:
+    """
+    Advanced chunking:
+    - Detect headings automatically
+    - Group into sections
+    - Ensure each chunk starts with heading
+    - Preserve context during splits
+    """
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    sections = []
+    current_heading = "General Information"
+    current_content = []
+
+    for line in lines:
+        if is_heading(line):
+            # Save previous section
+            if current_content:
+                sections.append((current_heading, " ".join(current_content)))
+                current_content = []
+
+            current_heading = line
         else:
-            chunks.append(" ".join(buffer_words))
+            current_content.append(line)
 
-    return [c.strip() for c in chunks if c.strip()]
+    if current_content:
+        sections.append((current_heading, " ".join(current_content)))
+
+    # 🔹 Now chunk sections smartly
+    chunks = []
+
+    for heading, content in sections:
+        words = content.split()
+
+        if len(words) <= max_words:
+            chunks.append(f"{heading}\n{content}")
+        else:
+            # Split but keep heading
+            start = 0
+            while start < len(words):
+                sub_chunk = words[start:start + max_words]
+                chunk_text = " ".join(sub_chunk)
+
+                chunks.append(f"{heading}\n{chunk_text}")
+                start += max_words
+
+    return chunks
 
 
 # ─────────────────────────────────────────────────────────────────────────────

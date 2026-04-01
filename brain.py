@@ -75,12 +75,13 @@ def _get_llm_cache_key(tenant_id: str, enabled_modules: List[str]) -> str:
 def get_llm_with_tools(tenant_id: str, enabled_modules: List[str]):
     """Returns a cached (llm_with_tools, tools) pair for this tenant+modules combo."""
     key = _get_llm_cache_key(tenant_id, enabled_modules)
+    fresh_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
     if key not in _llm_cache:
         tools = build_tools_for_tenant(tenant_id, enabled_modules)
         if tools:
-            _llm_cache[key] = (_main_llm.bind_tools(tools), tools)
+            _llm_cache[key] = (fresh_llm.bind_tools(tools), tools)
         else:
-            _llm_cache[key] = (_main_llm, [])
+            _llm_cache[key] = (fresh_llm, [])
         print(f"[BRAIN] LLM+tools cached for key={key}")
     return _llm_cache[key]
 
@@ -129,6 +130,61 @@ async def safe_llm_call(llm_with_tools, messages):
 
 # ── Malformed tool-call recovery ──────────────────────────────────────────────
 
+def _log_groq_error(exc: Exception, label: str = "[LLM_ERROR]"):
+    """
+    Dumps every meaningful field from a Groq BadRequestError for diagnosis.
+    Call this BEFORE any recovery attempt so every failure is recorded.
+    """
+    log(label, f"Exception type : {type(exc).__name__}")
+    log(label, f"Exception str  : {str(exc)[:600]}")
+    try:
+        body = getattr(exc, 'body', None)
+        log(label, f"exc.body (raw) : {body}")
+        if isinstance(body, str):
+            body = json.loads(body)
+        if isinstance(body, dict):
+            err = body.get('error', {})
+            log(label, f"error.type     : {err.get('type')}")
+            log(label, f"error.code     : {err.get('code')}")
+            log(label, f"error.message  : {str(err.get('message', ''))[:400]}")
+            failed_gen = err.get('failed_generation', '')
+            if failed_gen:
+                log(label, f"failed_gen     : {failed_gen!r}")
+            else:
+                log(label, "failed_gen     : <not present>")
+    except Exception as dump_err:
+        log(label, f"Could not parse exc.body: {dump_err}")
+    # Also log status_code if available
+    sc = getattr(exc, 'status_code', getattr(exc, 'status', None))
+    if sc:
+        log(label, f"HTTP status    : {sc}")
+
+
+def _log_messages_sent(messages, label: str = "[LLM_MSGS]"):
+    """
+    Logs a brief summary of each message in the list so we can verify
+    the conversation shape Groq receives.
+    """
+    log(label, f"Total messages : {len(messages)}")
+    for i, m in enumerate(messages):
+        mtype = type(m).__name__
+        content = ""
+        try:
+            if isinstance(m.content, str):
+                content = m.content[:120].replace('\n', ' ')
+            else:
+                content = str(m.content)[:120]
+        except Exception:
+            content = "<unreadable>"
+        tool_calls_info = ""
+        if hasattr(m, 'tool_calls') and m.tool_calls:
+            tool_calls_info = f" | tool_calls={[tc.get('name','?') for tc in m.tool_calls]}"
+        tool_call_id = ""
+        if hasattr(m, 'tool_call_id') and m.tool_call_id:
+            tool_call_id = f" | tool_call_id={m.tool_call_id}"
+        log(label, f"  [{i}] {mtype}{tool_calls_info}{tool_call_id} | '{content}'")
+
+
 def _parse_malformed_tool_call(exc: Exception):
     """
     Tries to extract a tool call from a Groq tool_use_failed BadRequestError.
@@ -140,12 +196,13 @@ def _parse_malformed_tool_call(exc: Exception):
             body = json.loads(body)
         failed_gen = body.get('error', {}).get('failed_generation', '')
         if not failed_gen:
+            log("[TOOL_RECOVERY]", "No 'failed_generation' in error body — cannot recover")
             return None
 
         log("[TOOL_RECOVERY]", f"Parsing malformed generation: {failed_gen!r}")
 
         match = re.search(
-            r'<function=([\w_]+)>?(\{.*?\})</function>',
+            r'<function=([\w_]+)\s*[>]?\s*(\{.*?\})\s*(?:</function>|>|$)',
             failed_gen,
             re.DOTALL,
         )
@@ -154,7 +211,11 @@ def _parse_malformed_tool_call(exc: Exception):
             return None
 
         tool_name = match.group(1)
-        tool_args = json.loads(match.group(2))
+        try:
+            tool_args = json.loads(match.group(2))
+        except json.JSONDecodeError as je:
+            log("[TOOL_RECOVERY]", f"JSON parse of args failed: {je}")
+            return None
 
         log("[TOOL_RECOVERY]", f"Recovered: tool='{tool_name}' args={tool_args}")
 
@@ -560,17 +621,26 @@ async def run_brain(
     history.append(HumanMessage(content=user_text))
 
     # FIX 4: trim history to avoid bloating prompt tokens
-    recent_history = [history[0]] + history[-max_history:]
+    non_system = [m for m in history if not isinstance(m, SystemMessage)]
+    recent_history = [history[0]] + non_system[-max_history:]
 
     # ── First LLM call ────────────────────────────────────────────────────────
     t_llm = datetime.now()
     log("[LLM]", f"ainvoke() | {len(recent_history)} msgs | modules={enabled_modules}")
+    # Log registered tool names so we can verify what Groq sees
+    if active_tools:
+        log("[LLM]", f"Bound tools    : {[t.name for t in active_tools]}")
+    else:
+        log("[LLM]", "Bound tools    : <none>")
+    # Log message shape for diagnosis
+    _log_messages_sent(recent_history, "[LLM_MSGS]")
     try:
         ai_msg = await safe_llm_call(llm_with_tools, recent_history)
         log("[LLM]", f"Done in {(datetime.now()-t_llm).total_seconds():.2f}s | "
             f"tool_calls={len(ai_msg.tool_calls)}")
         print_token_usage(ai_msg, "Initial LLM")
     except BadRequestError as e:
+        _log_groq_error(e, "[LLM_ERROR]")
         log("[LLM]", "BadRequestError (tool_use_failed) — attempting recovery")
         recovered = _parse_malformed_tool_call(e)
         if recovered:
@@ -635,11 +705,13 @@ async def run_brain(
 
         t_llm2 = datetime.now()
         log("[LLM]", "Post-tool ainvoke()")
+        _log_messages_sent(recent_history, "[LLM_POST_MSGS]")
         try:
             ai_msg = await safe_llm_call(llm_with_tools, recent_history)
             log("[LLM]", f"Done in {(datetime.now()-t_llm2).total_seconds():.2f}s")
             print_token_usage(ai_msg, "Post-tool LLM")
         except BadRequestError as e:
+            _log_groq_error(e, "[LLM_POST_ERROR]")
             log("[LLM]", "Post-tool BadRequestError — attempting recovery")
             recovered = _parse_malformed_tool_call(e)
             if recovered:
