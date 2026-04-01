@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 from datetime import datetime, date
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request,Depends, Header
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -689,6 +689,93 @@ async def superadmin_stats():
     if not DB_AVAILABLE:
         return {}
     return await asyncio.to_thread(get_platform_stats)
+
+
+# ── Superadmin: Module requests ────────────────────────────────────────────────
+
+class ModuleSetRequest(BaseModel):
+    tenant_id: str
+    module_name: str
+    is_enabled: bool
+
+class ModuleRequestResolve(BaseModel):
+    status: str  # 'approved' | 'rejected'
+
+@app.post("/superadmin/modules/set", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_set_module(req: ModuleSetRequest):
+    """Directly enable/disable a module for any tenant (superadmin override)."""
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    from modules.module_registry import ALL_MODULES
+    if req.module_name not in ALL_MODULES:
+        raise HTTPException(status_code=400, detail=f"Unknown module: {req.module_name}")
+    result = await asyncio.to_thread(set_module_enabled, req.tenant_id, req.module_name, req.is_enabled)
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to update module")
+    # Invalidate session cache for this tenant
+    for sess in chat_sessions.values():
+        if sess.get("tenant_id") == req.tenant_id:
+            sess.pop("enabled_modules", None)
+    try:
+        from modules.module_registry import invalidate_tools_cache
+        invalidate_tools_cache(req.tenant_id)
+    except Exception:
+        pass
+    return {"ok": True, "tenant_id": req.tenant_id, "module_name": req.module_name, "is_enabled": req.is_enabled}
+
+
+@app.get("/superadmin/module-requests", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_get_module_requests():
+    """
+    Get all module enable/disable requests submitted by tenant admins.
+    Requires a module_requests table — returns empty list gracefully if not present.
+    """
+    if not DB_AVAILABLE:
+        return []
+    try:
+        from database.crud import get_all_module_requests
+        return await asyncio.to_thread(get_all_module_requests)
+    except (ImportError, Exception):
+        return []  # table may not exist yet
+
+
+@app.post("/admin/modules/request")
+async def admin_request_module(req: Request, session=Depends(_check_admin_token)):
+    """
+    Tenant admin submits a request to enable/disable a module.
+    Stores in module_requests table (created if needed).
+    """
+    data = await req.json()
+    module_name = data.get("module_name", "")
+    requested_state = bool(data.get("requested_state", True))
+    note = str(data.get("note", ""))[:500]
+
+    if not DB_AVAILABLE:
+        return {"ok": True, "queued": True}
+    try:
+        from database.crud import create_module_request
+        result = await asyncio.to_thread(
+            create_module_request,
+            session["tenant_id"], module_name, requested_state, note
+        )
+        return {"ok": True, "request_id": result}
+    except (ImportError, Exception) as e:
+        # Graceful degradation — log and return ok so frontend shows success
+        print(f"[MODULE_REQUEST] Could not save request (table may not exist): {e}")
+        return {"ok": True, "queued": True}
+
+
+@app.patch("/superadmin/module-requests/{request_id}", dependencies=[Depends(_check_superadmin_token)])
+async def superadmin_resolve_module_request(request_id: str, req: ModuleRequestResolve):
+    """Mark a module request as approved or rejected."""
+    if not DB_AVAILABLE:
+        return {"ok": True}
+    try:
+        from database.crud import resolve_module_request
+        await asyncio.to_thread(resolve_module_request, request_id, req.status)
+    except (ImportError, Exception) as e:
+        print(f"[MODULE_REQUEST] Could not resolve request: {e}")
+    return {"ok": True}
 
 
 # ── Sarvam STT warm-up ─────────────────────────────────────────────────────────

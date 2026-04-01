@@ -738,3 +738,99 @@ def get_enabled_modules(tenant_id: str) -> list:
     """Returns list of enabled module name strings."""
     modules_dict = get_tenant_modules(tenant_id)
     return [name for name, on in modules_dict.items() if on]
+
+# ── Module Requests (tenant admin → superadmin workflow) ──────────────────────
+
+def _ensure_module_requests_table():
+    """Create module_requests table if it doesn't exist yet."""
+    sql = """
+        CREATE TABLE IF NOT EXISTS module_requests (
+            id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id       UUID        NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+            module_name     VARCHAR(50) NOT NULL,
+            requested_state BOOLEAN     NOT NULL,
+            note            TEXT,
+            status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                                CHECK (status IN ('pending', 'approved', 'rejected')),
+            created_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_module_requests_status ON module_requests (status, created_at DESC);
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def create_module_request(tenant_id: str, module_name: str, requested_state: bool, note: str = "") -> str:
+    """Insert a new module enable/disable request. Returns the new request ID."""
+    _ensure_module_requests_table()
+    sql = """
+        INSERT INTO module_requests (tenant_id, module_name, requested_state, note)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (tenant_id, module_name, requested_state, note))
+            result = cur.fetchone()
+        conn.commit()
+        return str(result["id"]) if result else ""
+    finally:
+        conn.close()
+
+
+def get_all_module_requests() -> List[Dict[str, Any]]:
+    """Return all module requests joined with tenant business name, newest first."""
+    _ensure_module_requests_table()
+    sql = """
+        SELECT mr.id, mr.tenant_id, t.business_name, mr.module_name,
+               mr.requested_state, mr.note, mr.status,
+               mr.created_at, mr.updated_at
+        FROM module_requests mr
+        JOIN tenants t ON t.tenant_id = mr.tenant_id
+        ORDER BY
+            CASE mr.status WHEN 'pending' THEN 0 ELSE 1 END,
+            mr.created_at DESC
+        LIMIT 200;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["id"] = str(d["id"])
+            d["tenant_id"] = str(d["tenant_id"])
+            if d.get("created_at"):
+                d["created_at"] = d["created_at"].isoformat()
+            if d.get("updated_at"):
+                d["updated_at"] = d["updated_at"].isoformat()
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def resolve_module_request(request_id: str, status: str):
+    """Mark a module request as approved or rejected."""
+    _ensure_module_requests_table()
+    sql = """
+        UPDATE module_requests
+        SET status = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (status, request_id))
+        conn.commit()
+    finally:
+        conn.close()
