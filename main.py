@@ -120,6 +120,10 @@ class ModuleToggleRequest(BaseModel):
 class KnowledgeUploadRequest(BaseModel):
     content: str
 
+class PreviewChatRequest(BaseModel):
+    message: str
+    history: Optional[List[dict]] = None   # [{role: "user"|"bot", text: "..."}]
+
 
 # ── App lifecycle ──────────────────────────────────────────────────────────────
 
@@ -472,7 +476,105 @@ async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_
     return await asyncio.to_thread(upsert_bot_config, session["tenant_id"], **fields)
 
 
+# ── Admin: Live Preview Chat ───────────────────────────────────────────────────
+
+MAX_PREVIEW_TURNS = 7   # max user messages allowed per preview session
+
+@app.post("/admin/preview-chat")
+async def admin_preview_chat(req: PreviewChatRequest, session=Depends(_check_admin_token)):
+    """
+    Text-only live preview of the bot. Accepts a user message + prior history,
+    calls the configured LLM with the tenant's system prompt, and returns the
+    AI reply.  No TTS, no calendar tools — pure conversational test.
+    """
+    tenant_id = session["tenant_id"]
+
+    # ── Count user turns already in history ──────────────────────────────────
+    prior_user_turns = sum(1 for m in (req.history or []) if m.get("role") == "user")
+    if prior_user_turns >= MAX_PREVIEW_TURNS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Preview limit reached ({MAX_PREVIEW_TURNS} messages). Reset to start a new session."
+        )
+
+    # ── Load bot config ───────────────────────────────────────────────────────
+    bot_cfg: dict = {}
+    if DB_AVAILABLE:
+        try:
+            bot_cfg = await asyncio.to_thread(get_bot_config, tenant_id) or {}
+        except Exception:
+            pass
+
+    # ── Build system prompt (no tools injected) ───────────────────────────────
+    from datetime import datetime as _dt
+    today = _dt.now().strftime("%Y-%m-%d")
+    day   = _dt.now().strftime("%A")
+
+    lang_code   = bot_cfg.get("language_code", "gu-IN")
+    receptionist= bot_cfg.get("receptionist_name") or "Priya"
+    bot_name    = bot_cfg.get("bot_name") or "SamaySetu AI"
+    biz_desc    = bot_cfg.get("business_description") or "a professional appointment booking service"
+    extra_ctx   = bot_cfg.get("extra_prompt_context") or ""
+    biz_start   = bot_cfg.get("business_hours_start", 9)
+    biz_end     = bot_cfg.get("business_hours_end", 18)
+    slot_dur    = bot_cfg.get("slot_duration_mins", 30)
+
+    lang_map = {
+        "gu-IN": "polite, natural Gujarati",
+        "hi-IN": "polite, natural Hindi",
+        "en-IN": "polite, natural Indian English",
+    }
+    lang_instr = lang_map.get(lang_code, "polite, natural Gujarati")
+    extra_line = f"\nAdditional context: {extra_ctx}" if extra_ctx else ""
+
+    system_prompt = f"""You are {receptionist}, the AI receptionist at {bot_name} — {biz_desc}.
+Today: {today} ({day}). All times in IST.
+Business hours: {biz_start}:00 to {biz_end}:00. Default slot: {slot_dur} minutes.{extra_line}
+
+This is a PREVIEW/TEST session by the business admin to see how you respond.
+Reply in {lang_instr}.
+Keep replies concise and natural — you are a voice assistant.
+You can book, cancel, or reschedule appointments in real operation but in this preview
+just describe what you would do or say.
+Do NOT mention that this is a preview to the user — respond as if it were a real call.
+"""
+
+    # ── Build message list for LLM ────────────────────────────────────────────
+    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage as LCAIMessage
+    messages = [SystemMessage(content=system_prompt)]
+
+    for m in (req.history or []):
+        role = m.get("role", "")
+        text = m.get("text", "")
+        if not text:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=text))
+        elif role == "bot":
+            messages.append(LCAIMessage(content=text))
+
+    messages.append(HumanMessage(content=req.message))
+
+
+    # ── Call LLM (small fast model, no tools) ─────────────────────────────────
+    try:
+        from langchain_groq import ChatGroq as _CG
+        preview_llm = _CG(model="llama-3.1-8b-instant", temperature=0.3)
+        ai_msg = await preview_llm.ainvoke(messages)
+        reply = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)[:200]}")
+
+    return {
+        "reply": reply,
+        "turn_number": prior_user_turns + 1,
+        "max_turns": MAX_PREVIEW_TURNS,
+        "limit_reached": (prior_user_turns + 1) >= MAX_PREVIEW_TURNS,
+    }
+
+
 # ── Admin: Calendar ────────────────────────────────────────────────────────────
+
 
 @app.post("/admin/calendar/connect")
 async def admin_connect_calendar(req: CalendarConnectRequest,

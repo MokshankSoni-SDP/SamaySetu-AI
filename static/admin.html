@@ -1742,6 +1742,175 @@
       border-color: var(--accent);
       background: rgba(245, 166, 35, .04);
     }
+
+    /* ── Live Preview Chat ── */
+    .live-chat-wrap {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .live-chat-messages {
+      flex: 1;
+      padding: 16px;
+      min-height: 260px;
+      max-height: 380px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+    }
+
+    .live-chat-welcome {
+      text-align: center;
+      margin: auto;
+      padding: 20px;
+      color: var(--muted);
+    }
+
+    .lc-msg {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      animation: lc-in .2s ease;
+    }
+
+    @keyframes lc-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .lc-msg.user { flex-direction: row-reverse; }
+
+    .lc-av {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .lc-av.user-av {
+      background: rgba(96, 165, 250, .2);
+      color: var(--info);
+    }
+
+    .lc-av.bot-av {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #0a0c10;
+    }
+
+    .lc-bubble {
+      max-width: 70%;
+      padding: 9px 13px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .lc-msg.bot .lc-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+
+    .lc-msg.user .lc-bubble {
+      background: rgba(245, 166, 35, .12);
+      border: 1px solid rgba(245, 166, 35, .25);
+      color: var(--text);
+      border-bottom-right-radius: 4px;
+    }
+
+    .live-chat-counter {
+      padding: 6px 16px;
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      background: var(--panel);
+    }
+
+    .live-chat-typing {
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .typing-dots {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .typing-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: typing-bounce .9s infinite ease-in-out;
+    }
+
+    .typing-dots span:nth-child(2) { animation-delay: .15s; }
+    .typing-dots span:nth-child(3) { animation-delay: .3s; }
+
+    @keyframes typing-bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+      40%            { transform: translateY(-5px); opacity: 1; }
+    }
+
+    .live-chat-limit {
+      padding: 10px 16px;
+      font-size: 12px;
+      color: var(--warn);
+      border-top: 1px solid var(--border);
+      background: rgba(245, 158, 11, .05);
+      display: flex;
+      align-items: center;
+    }
+
+    .live-chat-input-row {
+      display: flex;
+      gap: 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .live-chat-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text);
+      font-family: var(--font-body);
+      outline: none;
+    }
+
+    .live-chat-input::placeholder { color: var(--muted); }
+
+    .live-chat-send-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      padding: 0 18px;
+      font-size: 16px;
+      color: #0a0c10;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+
+    .live-chat-send-btn:hover { opacity: .85; }
+    .live-chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
   </style>
 </head>
 
@@ -2156,28 +2325,70 @@
                 </div>
               </div>
 
-              <!-- PREVIEW PANEL -->
+              <!-- PREVIEW PANEL — LIVE CHAT -->
               <div class="config-panel" id="cpanel-preview">
-                <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
-                  This is how <strong id="previewBotLabel" style="color:var(--text);">your assistant</strong> will sound
-                  to patients — based on your current settings.
-                </div>
-                <div class="preview-pane">
-                  <div class="preview-seg">
-                    <button class="on" onclick="switchSim('book',this)">Booking call</button>
-                    <button onclick="switchSim('faq',this)">Patient question</button>
-                    <button onclick="switchSim('busy',this)">Slot busy</button>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                  <div style="font-size:12px;color:var(--muted);">
+                    Chat with <strong id="previewBotLabel" style="color:var(--text);">your assistant</strong>
+                    using your current saved configuration.
                   </div>
-                  <div id="simOutput"></div>
+                  <button class="btn btn-ghost btn-sm" id="previewResetBtn" onclick="resetPreviewChat()" style="gap:6px;">
+                    ↺ Reset Chat
+                  </button>
+                </div>
+
+                <!-- Chat window -->
+                <div class="live-chat-wrap" id="liveChatWrap">
+                  <div class="live-chat-messages" id="liveChatMessages">
+                    <div class="live-chat-welcome">
+                      <span style="font-size:22px;">🤖</span>
+                      <div style="margin-top:6px;font-size:13px;color:var(--text);font-weight:500;">Live Preview</div>
+                      <div style="font-size:12px;color:var(--muted);margin-top:4px;">Type a message to test your bot — no voice, just text.</div>
+                    </div>
+                  </div>
+
+                  <!-- Turn counter -->
+                  <div class="live-chat-counter" id="liveChatCounter" style="display:none;">
+                    <span id="liveChatTurnText">0 / 7 messages used</span>
+                  </div>
+
+                  <!-- Typing indicator -->
+                  <div class="live-chat-typing" id="liveChatTyping" style="display:none;">
+                    <div class="sim-av bot" id="liveChatTypingAv">?</div>
+                    <div class="typing-dots">
+                      <span></span><span></span><span></span>
+                    </div>
+                  </div>
+
+                  <!-- Limit message -->
+                  <div class="live-chat-limit" id="liveChatLimit" style="display:none;">
+                    <span>🔒 Preview limit reached (7 messages).</span>
+                    <button class="btn btn-ghost btn-sm" onclick="resetPreviewChat()" style="margin-left:8px;">Reset</button>
+                  </div>
+
+                  <!-- Input bar -->
+                  <div class="live-chat-input-row" id="liveChatInputRow">
+                    <input
+                      type="text"
+                      id="liveChatInput"
+                      class="live-chat-input"
+                      placeholder="Type your test message…"
+                      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendPreviewMessage();}"
+                    />
+                    <button class="live-chat-send-btn" id="liveChatSendBtn" onclick="sendPreviewMessage()">
+                      ➤
+                    </button>
+                  </div>
                 </div>
 
                 <div style="margin-top:20px;">
-                  <div
-                    style="font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;">
+                  <div style="font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;">
                     Prompt sent to AI (auto-generated from your settings)</div>
                   <div class="prompt-preview" id="promptPreview">Save config to see the generated prompt.</div>
                 </div>
               </div>
+
+
 
               <!-- Save actions (always visible) -->
               <div class="form-actions" style="border-top:1px solid var(--border);padding-top:20px;margin-top:8px;">
@@ -3682,6 +3893,138 @@ ${cfg.extra_prompt_context ? 'Additional context: ' + cfg.extra_prompt_context :
 
       // ────────────────────────────────────────────────────────────────
       checkStoredLogin();
+    </script>
+
+    <script>
+      // ── Live Preview Chat ─────────────────────────────────────────────────────
+      const MAX_TURNS = 7;
+      let previewHistory = [];
+      let previewBusy   = false;
+
+      function _getBotInitial() {
+        return (getDynRecepName().charAt(0) || '?').toUpperCase();
+      }
+      function _scrollChatBottom() {
+        const el = document.getElementById('liveChatMessages');
+        if (el) el.scrollTop = el.scrollHeight;
+      }
+      function _renderPreviewBubble(role, text) {
+        const msgs = document.getElementById('liveChatMessages');
+        if (!msgs) return;
+        const welcome = msgs.querySelector('.live-chat-welcome');
+        if (welcome) welcome.remove();
+        const isBot = role === 'bot';
+        const div = document.createElement('div');
+        div.className = `lc-msg ${role}`;
+        div.innerHTML = `
+          <div class="lc-av ${isBot ? 'bot-av' : 'user-av'}">${isBot ? _getBotInitial() : 'A'}</div>
+          <div class="lc-bubble">${text.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
+        `;
+        msgs.appendChild(div);
+        _scrollChatBottom();
+      }
+      function _setTyping(show) {
+        const t = document.getElementById('liveChatTyping');
+        const av = document.getElementById('liveChatTypingAv');
+        if (t) t.style.display = show ? 'flex' : 'none';
+        if (av) av.textContent = _getBotInitial();
+        if (show) _scrollChatBottom();
+      }
+      function _updateCounter() {
+        const userTurns = previewHistory.filter(m => m.role === 'user').length;
+        const ctr = document.getElementById('liveChatCounter');
+        const txt = document.getElementById('liveChatTurnText');
+        if (!ctr || !txt) return;
+        if (userTurns > 0) {
+          ctr.style.display = 'flex';
+          txt.textContent = `${userTurns} / ${MAX_TURNS} messages used`;
+          txt.style.color = userTurns >= MAX_TURNS ? 'var(--danger)' : 'var(--muted)';
+        } else {
+          ctr.style.display = 'none';
+        }
+      }
+      function _setInputLocked(locked) {
+        const row = document.getElementById('liveChatInputRow');
+        const lim = document.getElementById('liveChatLimit');
+        const inp = document.getElementById('liveChatInput');
+        const btn = document.getElementById('liveChatSendBtn');
+        if (locked) {
+          if (row) row.style.display = 'none';
+          if (lim) lim.style.display = 'flex';
+        } else {
+          if (row) row.style.display = 'flex';
+          if (lim) lim.style.display = 'none';
+          if (btn) btn.disabled = false;
+          if (inp) inp.disabled = false;
+        }
+      }
+      async function sendPreviewMessage() {
+        if (previewBusy) return;
+        const inp = document.getElementById('liveChatInput');
+        if (!inp) return;
+        const text = inp.value.trim();
+        if (!text) return;
+        const userTurns = previewHistory.filter(m => m.role === 'user').length;
+        if (userTurns >= MAX_TURNS) { _setInputLocked(true); return; }
+
+        inp.value = '';
+        previewBusy = true;
+        const btn = document.getElementById('liveChatSendBtn');
+        if (btn) btn.disabled = true;
+        if (inp) inp.disabled = true;
+
+        _renderPreviewBubble('user', text);
+        const historySnapshot = [...previewHistory];
+        previewHistory.push({ role: 'user', text });
+        _updateCounter();
+        _setTyping(true);
+
+        try {
+          const res = await apiFetch('/admin/preview-chat', {
+            method: 'POST',
+            body: JSON.stringify({ message: text, history: historySnapshot })
+          });
+          _setTyping(false);
+          const reply = res.reply || '—';
+          _renderPreviewBubble('bot', reply);
+          previewHistory.push({ role: 'bot', text: reply });
+          if (res.limit_reached) _setInputLocked(true);
+        } catch (e) {
+          _setTyping(false);
+          const errMsg = e.message.includes('429')
+            ? '🔒 Preview limit reached. Click Reset to start over.'
+            : `⚠ Error: ${e.message}`;
+          _renderPreviewBubble('bot', errMsg);
+          if (e.message.includes('429')) _setInputLocked(true);
+        }
+
+        _updateCounter();
+        previewBusy = false;
+        const btn2 = document.getElementById('liveChatSendBtn');
+        const inp2 = document.getElementById('liveChatInput');
+        if (btn2) btn2.disabled = false;
+        if (inp2) inp2.disabled = false;
+        const limEl = document.getElementById('liveChatLimit');
+        if (!(limEl && limEl.style.display === 'flex') && inp2) inp2.focus();
+      }
+      function resetPreviewChat() {
+        previewHistory = [];
+        previewBusy    = false;
+        const msgs = document.getElementById('liveChatMessages');
+        if (msgs) {
+          msgs.innerHTML = `
+            <div class="live-chat-welcome">
+              <span style="font-size:22px;">🤖</span>
+              <div style="margin-top:6px;font-size:13px;color:var(--text);font-weight:500;">Live Preview</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">Type a message to test your bot — no voice, just text.</div>
+            </div>`;
+        }
+        _updateCounter();
+        _setInputLocked(false);
+        _setTyping(false);
+        const inp = document.getElementById('liveChatInput');
+        if (inp) { inp.value = ''; inp.focus(); }
+      }
     </script>
 </body>
 
