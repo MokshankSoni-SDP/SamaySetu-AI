@@ -559,7 +559,7 @@ Do NOT mention that this is a preview to the user — respond as if it were a re
     # ── Call LLM (small fast model, no tools) ─────────────────────────────────
     try:
         from langchain_groq import ChatGroq as _CG
-        preview_llm = _CG(model="llama-3.1-8b-instant", temperature=0.3)
+        preview_llm = _CG(model="llama-3.3-70b-versatile", temperature=0.3)
         ai_msg = await preview_llm.ainvoke(messages)
         reply = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
     except Exception as e:
