@@ -903,11 +903,16 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
     session_id = f"web_{datetime.now().strftime('%H%M%S%f')}"
     log("[WS]", f"Connection ACCEPTED | session='{session_id}' | phone='{phone_number}'")
 
+    # Event set directly by brain when a language switch is detected — causes STT to reconnect.
+    # Stored in chat_sessions so brain.py can signal it without going through the browser.
+    language_switch_event = asyncio.Event()
+
     chat_sessions[session_id] = {
-        "history":      [],
-        "phone_number": phone_number,
-        "tenant_id":    None,
-        "bot_config":   {},
+        "history":               [],
+        "phone_number":          phone_number,
+        "tenant_id":             None,
+        "bot_config":            {},
+        "language_switch_event": language_switch_event,   # brain signals this directly
     }
 
     brain_lock = asyncio.Lock()
@@ -1050,6 +1055,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
 
         while reconnect_num <= max_reconnects:
             attempt_label = f"conn#{reconnect_num + 1}"
+            lang_switch_reconnect = False  # track if this reconnect was triggered by language switch
 
             if reconnect_num == 0:
                 for _ in range(15):
@@ -1088,6 +1094,13 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                         last_real_pkt_time = asyncio.get_event_loop().time()
 
                         while True:
+                            # Check if a language switch was requested — break to reconnect
+                            if language_switch_event.is_set():
+                                language_switch_event.clear()
+                                log("[STT_SEND]", "Language switch detected — reconnecting STT")
+                                lang_switch_reconnect = True
+                                break
+
                             try:
                                 raw = audio_buf.get_nowait()
                             except asyncio.QueueEmpty:
@@ -1116,6 +1129,11 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
 
             except Exception as e:
                 log("[STT_SEND]", f"Sarvam connect FAILED ({attempt_label}): {e}")
+
+            # Language-switch reconnects are intentional — don't count against the error limit
+            if lang_switch_reconnect:
+                log("[STT_SEND]", "Language-switch reconnect — not counted as failure")
+                continue
 
             reconnect_num += 1
             if reconnect_num <= max_reconnects:

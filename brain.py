@@ -558,6 +558,8 @@ async def run_brain(
                 "appointment": {"date": None, "time": None, "duration": None},
                 "reschedule": {"old_time": None, "new_time": None},
                 "date_context": {"resolved_date": None, "source": "none"},
+                "detected_language": None,
+                "user_preferred_language": None,
             }
         }
 
@@ -602,6 +604,39 @@ async def run_brain(
     session_data["memory"] = updated_memory
 
     log("[MEMORY]", f"Updated: {updated_memory}")
+
+    # ── Dynamic language switching ────────────────────────────────────────────
+    # Priority: user_preferred_language > detected_language
+    # user_preferred_language is set when user EXPLICITLY requests a language.
+    # detected_language is set by auto-detection from speech content.
+    _SPEAKER_MAP = {
+        "gu-IN": "simran",
+        "hi-IN": "simran",
+        "en-IN": "simran",
+    }
+    preferred_lang = updated_memory.get("user_preferred_language")
+    detected_lang  = updated_memory.get("detected_language")
+
+    # Pick the effective target language — preferred wins over detected
+    target_lang = None
+    if preferred_lang and preferred_lang in ("gu-IN", "hi-IN", "en-IN"):
+        target_lang = preferred_lang
+    elif detected_lang and detected_lang in ("gu-IN", "hi-IN", "en-IN"):
+        target_lang = detected_lang
+
+    if target_lang and target_lang != tts_lang:
+        log("[LANG_SWITCH]", f"Language switched: {tts_lang} → {target_lang}"
+            f" (source: {'preferred' if preferred_lang == target_lang else 'detected'})")
+        tts_lang    = target_lang
+        tts_speaker = _SPEAKER_MAP.get(target_lang, tts_speaker)
+        # Persist into live bot_config so next STT reconnect reads the new lang
+        session_data["bot_config"]["language_code"] = tts_lang
+        session_data["bot_config"]["tts_speaker"]   = tts_speaker
+        # Signal sarvam_sender directly via the shared asyncio.Event in chat_sessions.
+        lang_evt = session_data.get("language_switch_event")
+        if lang_evt is not None:
+            lang_evt.set()
+            log("[LANG_SWITCH]", f"language_switch_event SET → STT will reconnect as {tts_lang}")
 
     # ── Inject tenant context into module tools ───────────────────────────────
     _inject_tool_context(session_id, chat_sessions, enabled_modules)
