@@ -269,6 +269,53 @@ def merge_memory(old, new):
     return old
 
 
+# ── Pure-Python language detector (zero LLM cost, <1ms) ─────────────────────
+# Reads the user's message for explicit language requests and returns the
+# requested language code. The main LLM is already instructed to ask the user
+# for their preferred language at the start of every conversation; once the user
+# answers, this detector picks it up and switches STT + TTS accordingly.
+
+_LANG_NAMES = {
+    "gu-IN": ["gujarati", "ગુજરાતી", "gujrati", "guj", "gujaratima", "gujarati ma"],
+    "hi-IN": ["hindi", "હિન્દી", "हिंदी", "hindi ma", "hindi mein"],
+    "en-IN": ["english", "ઇંગ્લિશ", "inglish", "angrezi", "અંગ્રેજી", "अंग्रेजी", "eng"],
+}
+
+_REQUEST_VERBS = [
+    # Gujarati script
+    "વાત કરી શકો", "વાત કરી શકશો", "વાત કરો", "બોલો", "બોલી શકો",
+    # Romanised / Hindi
+    "baat karo", "baat kar", "boliye", "bolna", "bolo", "bolsho",
+    "bol sak", "baat kar sak",
+    # English
+    "speak", "talk", "switch to", "change to",
+    "in english", "in gujarati", "in hindi",
+    "prefer", "language",
+]
+
+
+def detect_requested_language(text: str) -> Optional[str]:
+    """
+    Returns 'gu-IN', 'hi-IN', 'en-IN', or None.
+    Fires only on EXPLICIT language requests — not on general conversation.
+    Zero LLM cost, runs in <1 ms.
+    """
+    t = text.lower().strip()
+    has_verb = any(v in t for v in _REQUEST_VERBS)
+    # For short messages (≤4 words) allow just the language name alone
+    # e.g. user simply says "Hindi" or "Gujarati" as their preference answer.
+    is_short = len(t.split()) <= 4
+    if not has_verb and not is_short:
+        return None
+
+    matches = {code: any(n in t for n in names)
+               for code, names in _LANG_NAMES.items()}
+    hits = [code for code, found in matches.items() if found]
+    if len(hits) != 1:
+        return None   # ambiguous or none named
+    return hits[0]
+
+
 # ── Noise / echo filters ──────────────────────────────────────────────────────
 
 COMMON_STT_VARIANTS = {
@@ -558,8 +605,6 @@ async def run_brain(
                 "appointment": {"date": None, "time": None, "duration": None},
                 "reschedule": {"old_time": None, "new_time": None},
                 "date_context": {"resolved_date": None, "source": "none"},
-                "detected_language": None,
-                "user_preferred_language": None,
             }
         }
 
@@ -605,38 +650,26 @@ async def run_brain(
 
     log("[MEMORY]", f"Updated: {updated_memory}")
 
-    # ── Dynamic language switching ────────────────────────────────────────────
-    # Priority: user_preferred_language > detected_language
-    # user_preferred_language is set when user EXPLICITLY requests a language.
-    # detected_language is set by auto-detection from speech content.
-    _SPEAKER_MAP = {
-        "gu-IN": "simran",
-        "hi-IN": "simran",
-        "en-IN": "simran",
-    }
-    preferred_lang = updated_memory.get("user_preferred_language")
-    detected_lang  = updated_memory.get("detected_language")
-
-    # Pick the effective target language — preferred wins over detected
-    target_lang = None
-    if preferred_lang and preferred_lang in ("gu-IN", "hi-IN", "en-IN"):
-        target_lang = preferred_lang
-    elif detected_lang and detected_lang in ("gu-IN", "hi-IN", "en-IN"):
-        target_lang = detected_lang
-
-    if target_lang and target_lang != tts_lang:
-        log("[LANG_SWITCH]", f"Language switched: {tts_lang} → {target_lang}"
-            f" (source: {'preferred' if preferred_lang == target_lang else 'detected'})")
-        tts_lang    = target_lang
-        tts_speaker = _SPEAKER_MAP.get(target_lang, tts_speaker)
+    # ── Pure-Python language switch (<1 ms, zero LLM cost) ───────────────────
+    # Checks the user's message for an explicit language request (e.g. "Hindi",
+    # "speak in Gujarati", "English please").  When the LLM asks the user for
+    # their preferred language at the start of the conversation the user's one-
+    # word / short answer is enough to trigger this.
+    _SPEAKER_MAP = {"gu-IN": "simran", "hi-IN": "simran", "en-IN": "simran"}
+    requested_lang = detect_requested_language(user_text)
+    if requested_lang and requested_lang != tts_lang:
+        log("[LANG_SWITCH]", f"Language switched: {tts_lang} → {requested_lang}")
+        tts_lang    = requested_lang
+        tts_speaker = _SPEAKER_MAP.get(requested_lang, tts_speaker)
         # Persist into live bot_config so next STT reconnect reads the new lang
         session_data["bot_config"]["language_code"] = tts_lang
         session_data["bot_config"]["tts_speaker"]   = tts_speaker
-        # Signal sarvam_sender directly via the shared asyncio.Event in chat_sessions.
+        # Signal sarvam_sender to close current STT connection and reopen with new lang
         lang_evt = session_data.get("language_switch_event")
         if lang_evt is not None:
             lang_evt.set()
             log("[LANG_SWITCH]", f"language_switch_event SET → STT will reconnect as {tts_lang}")
+
 
     # ── Inject tenant context into module tools ───────────────────────────────
     _inject_tool_context(session_id, chat_sessions, enabled_modules)
