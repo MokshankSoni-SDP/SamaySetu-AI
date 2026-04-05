@@ -124,6 +124,9 @@ class PreviewChatRequest(BaseModel):
     message: str
     history: Optional[List[dict]] = None   # [{role: "user"|"bot", text: "..."}]
 
+class VoicePreviewRequest(BaseModel):
+    speaker: str
+    language_code: str
 
 # ── App lifecycle ──────────────────────────────────────────────────────────────
 
@@ -185,6 +188,18 @@ def _check_superadmin_token(x_superadmin_token: Optional[str] = Header(None)):
     key = os.getenv("SUPERADMIN_SECRET", "changeme-superadmin")
     if x_superadmin_token != key:
         raise HTTPException(status_code=401, detail="Superadmin access denied")
+
+DEFAULT_TTS_SPEAKER = "simran"
+SUPPORTED_TTS_SPEAKERS = {"simran", "ritu", "priya"}
+TTS_SPEAKER_ALIASES = {"amit": "priya"}  # backward compatibility
+
+def _normalize_tts_speaker(speaker: Optional[str]) -> str:
+    s = (speaker or "").strip().lower()
+    if s in TTS_SPEAKER_ALIASES:
+        return TTS_SPEAKER_ALIASES[s]
+    if s in SUPPORTED_TTS_SPEAKERS:
+        return s
+    return DEFAULT_TTS_SPEAKER
 
 
 # ── TTS helpers ────────────────────────────────────────────────────────────────
@@ -475,6 +490,42 @@ async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_
     fields = {k: v for k, v in req.dict().items() if v is not None}
     return await asyncio.to_thread(upsert_bot_config, session["tenant_id"], **fields)
 
+@app.post("/admin/voice-preview")
+async def voice_preview(req: VoicePreviewRequest, session=Depends(_check_admin_token)):
+    try:
+        allowed_speakers = SUPPORTED_TTS_SPEAKERS | set(TTS_SPEAKER_ALIASES.keys())
+        allowed_langs = {"en-IN", "hi-IN", "gu-IN"}
+
+        raw_speaker = (req.speaker or "").strip().lower()
+        speaker = _normalize_tts_speaker(raw_speaker)
+        lang = (req.language_code or "").strip()
+
+        if raw_speaker not in allowed_speakers:
+            raise HTTPException(status_code=400, detail="Invalid speaker")
+        if lang not in allowed_langs:
+            raise HTTPException(status_code=400, detail="Invalid language_code")
+
+        sample_texts = {
+            "en-IN": "Hello, welcome to our clinic. How can I assist you today?",
+            "hi-IN": "नमस्ते, हमारे क्लिनिक में आपका स्वागत है। मैं आपकी कैसे मदद कर सकता हूँ?",
+            "gu-IN": "નમસ્તે, અમારા ક્લિનિકમાં તમારું સ્વાગત છે. હું તમારી કેવી રીતે મદદ કરી શકું?"
+        }
+
+        text = sample_texts.get(lang, sample_texts["en-IN"])
+
+        audio_b64 = await tts_convert(
+            text=text,
+            speaker=speaker,
+            lang=lang
+        )
+
+        return {
+            "audio": audio_b64,
+            "format": "wav"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── Admin: Live Preview Chat ───────────────────────────────────────────────────
 
@@ -966,7 +1017,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
 
                                         if bot_cfg and bot_cfg.get("greeting_message"):
                                             greeting_text = bot_cfg["greeting_message"]
-                                            tts_speaker   = bot_cfg.get("tts_speaker", "simran")
+                                            tts_speaker   = _normalize_tts_speaker(bot_cfg.get("tts_speaker", DEFAULT_TTS_SPEAKER))
                                             tts_lang      = bot_cfg.get("language_code", "gu-IN")
 
                                             async def play_initial_greeting():
@@ -1216,7 +1267,7 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                     except Exception as e:
                         fallback_text = _get_fallback_message(e)
                         bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
-                        fb_speaker = bot_cfg.get("tts_speaker", "simran")
+                        fb_speaker = _normalize_tts_speaker(bot_cfg.get("tts_speaker", DEFAULT_TTS_SPEAKER))
                         fb_lang    = bot_cfg.get("language_code", "gu-IN")
                         try:
                             await websocket.send_json({

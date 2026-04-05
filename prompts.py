@@ -252,6 +252,7 @@ Never fill missing gaps with assumptions. This is a HARD RULE.
 """
 
     base = f"""You are {receptionist_name}, the AI receptionist at {bot_name} — {biz_description}.
+    Remember you are a Female AI receptionist.
 Today: {today_date} ({day}). All times in IST.
 {extra_line}
 

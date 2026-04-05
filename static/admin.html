@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -1283,7 +1283,7 @@
       background: rgba(96, 165, 250, .15);
     }
 
-    .vc-amit .vc-avatar {
+    .vc-priya .vc-avatar {
       background: rgba(34, 197, 94, .15);
     }
 
@@ -1318,7 +1318,7 @@
       color: var(--info);
     }
 
-    .vc-amit .vc-tone-label {
+    .vc-priya .vc-tone-label {
       color: var(--success);
     }
 
@@ -1347,9 +1347,219 @@
       color: rgba(96, 165, 250, .7);
     }
 
-    .vc-amit .vc-sample {
+    .vc-priya .vc-sample {
       background: rgba(34, 197, 94, .07);
       color: rgba(34, 197, 94, .7);
+    }
+
+    .vc-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .vc-simran .vc-play-btn {
+      --vc-btn-color: #f5a623;
+      --vc-btn-color-2: #ec783a;
+      --vc-btn-rgb: 245, 166, 35;
+    }
+
+    .vc-ritu .vc-play-btn {
+      --vc-btn-color: #60a5fa;
+      --vc-btn-color-2: #3b82f6;
+      --vc-btn-rgb: 96, 165, 250;
+    }
+
+    .vc-priya .vc-play-btn {
+      --vc-btn-color: #22c55e;
+      --vc-btn-color-2: #16a34a;
+      --vc-btn-rgb: 34, 197, 94;
+    }
+
+    .vc-play-btn {
+      width: 42px;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid rgba(var(--vc-btn-rgb), .45);
+      background: linear-gradient(135deg, rgba(var(--vc-btn-rgb), .20), rgba(var(--vc-btn-rgb), .10));
+      color: var(--vc-btn-color);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 -1px 5px rgba(0, 0, 0, .16);
+      transition: transform .24s ease, border-color .24s ease, color .24s ease, background .24s ease;
+      isolation: isolate;
+    }
+
+    .vc-play-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(135deg, var(--vc-btn-color), var(--vc-btn-color-2));
+      opacity: 0;
+      transition: opacity .24s ease;
+      z-index: 0;
+    }
+
+    .vc-play-btn::after {
+      content: '';
+      position: absolute;
+      inset: 4px;
+      border-radius: inherit;
+      border: 1px solid rgba(255, 255, 255, .2);
+      opacity: .6;
+      z-index: 0;
+    }
+
+    .vc-play-btn .play-icon,
+    .vc-play-btn .eq-bars {
+      position: relative;
+      z-index: 1;
+    }
+
+    .vc-play-btn .play-icon {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      transform: translateX(1px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    .vc-play-btn .eq-bars {
+      position: absolute;
+      display: none;
+      align-items: flex-end;
+      gap: 2px;
+      height: 14px;
+    }
+
+    .vc-play-btn .eq-bars span {
+      display: block;
+      width: 3px;
+      height: 65%;
+      border-radius: 2px;
+      background: currentColor;
+      animation: vcEqBounce .75s ease-in-out infinite alternate;
+    }
+
+    .vc-play-btn .eq-bars span:nth-child(1) {
+      height: 40%;
+      animation-delay: 0s;
+    }
+
+    .vc-play-btn .eq-bars span:nth-child(2) {
+      height: 70%;
+      animation-delay: .14s;
+    }
+
+    .vc-play-btn .eq-bars span:nth-child(3) {
+      height: 50%;
+      animation-delay: .28s;
+    }
+
+    .vc-play-btn .eq-bars span:nth-child(4) {
+      height: 82%;
+      animation-delay: .1s;
+    }
+
+    .vc-play-btn:hover {
+      border-color: rgba(var(--vc-btn-rgb), .75);
+      color: #fff;
+      transform: translateY(-1px) scale(1.03);
+    }
+
+    .vc-play-btn:hover::before {
+      opacity: 1;
+    }
+
+    .vc-play-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(var(--vc-btn-rgb), .28);
+    }
+
+    .vc-play-btn:disabled {
+      opacity: .6;
+      cursor: wait;
+      transform: none;
+    }
+
+    .vc-play-btn.loading {
+      animation: vcLoadingPulse .9s ease-in-out infinite;
+    }
+
+    .vc-play-btn.playing {
+      color: #fff;
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--vc-btn-color), var(--vc-btn-color-2));
+    }
+
+    .vc-play-btn.playing::before {
+      opacity: 0;
+    }
+
+    .vc-play-btn.playing .play-icon {
+      opacity: 0;
+      transform: scale(.8);
+    }
+
+    .vc-play-btn.playing .eq-bars {
+      display: inline-flex;
+    }
+
+    .vc-play-btn.loading .play-icon {
+      opacity: .45;
+      animation: vcSpinPulse .9s ease-in-out infinite;
+    }
+
+    @keyframes vcEqBounce {
+      0% {
+        transform: scaleY(.42);
+      }
+
+      100% {
+        transform: scaleY(1);
+      }
+    }
+
+    @keyframes vcLoadingPulse {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.04);
+      }
+    }
+
+    @keyframes vcSpinPulse {
+      0% {
+        transform: translateX(1px) scale(.94);
+      }
+
+      50% {
+        transform: translateX(1px) scale(1.08);
+      }
+
+      100% {
+        transform: translateX(1px) scale(.94);
+      }
+    }
+
+    .vc-play-status {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .02em;
+      transition: color .2s;
+    }
+
+    .vc-play-status.active {
+      color: var(--accent);
     }
 
     /* Language selector */
@@ -2145,6 +2355,15 @@
                     <div class="vc-desc">Soft, friendly tone with a natural cadence. Sounds like a trusted clinic staff
                       member — never robotic.</div>
                     <div class="vc-sample" id="simran-sample">"ડૉક્ટર પટેલના ક્લિનિકમાં આપનું સ્વાગત છે..."</div>
+                    <div class="vc-actions">
+                      <button type="button" class="vc-play-btn" data-speaker="simran" aria-label="Preview Simran voice" title="Preview Simran voice" onclick="previewVoice('simran', event)">
+                        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <polygon points="7,4 20,12 7,20"></polygon>
+                        </svg>
+                        <div class="eq-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                      </button>
+                      <span class="vc-play-status" id="vps-simran"></span>
+                    </div>
                   </div>
 
                   <div class="voice-card vc-ritu" id="vc-ritu" onclick="selectVoice('ritu')">
@@ -2155,16 +2374,34 @@
                     <div class="vc-desc">Crisp, professional delivery. Ideal for clinics that want a polished, efficient
                       assistant.</div>
                     <div class="vc-sample" id="ritu-sample">"ડૉ. પટેલ ક્લિનિક. આપની appointment માટે..."</div>
+                    <div class="vc-actions">
+                      <button type="button" class="vc-play-btn" data-speaker="ritu" aria-label="Preview Ritu voice" title="Preview Ritu voice" onclick="previewVoice('ritu', event)">
+                        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <polygon points="7,4 20,12 7,20"></polygon>
+                        </svg>
+                        <div class="eq-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                      </button>
+                      <span class="vc-play-status" id="vps-ritu"></span>
+                    </div>
                   </div>
 
-                  <div class="voice-card vc-amit" id="vc-amit" onclick="selectVoice('amit')">
+                  <div class="voice-card vc-priya" id="vc-priya" onclick="selectVoice('priya')">
                     <div class="vc-avatar">🎙</div>
-                    <div class="vc-name">Amit</div>
-                    <div class="vc-gender">Male</div>
+                    <div class="vc-name">Priya</div>
+                    <div class="vc-gender">Female</div>
                     <div class="vc-tone-label">Calm &amp; Reassuring</div>
-                    <div class="vc-desc">Deep, steady male voice. Works well for practices where patients may feel
+                    <div class="vc-desc">Warm, steady female voice. Works well for practices where patients may feel
                       anxious — ortho, dental, etc.</div>
-                    <div class="vc-sample" id="amit-sample">"ડૉ. પટેલ ક્લિનિક. હું Amit, આપની appointment..."</div>
+                    <div class="vc-sample" id="priya-sample">"ડૉ. પટેલ ક્લિનિક. હું Priya, આપની appointment..."</div>
+                    <div class="vc-actions">
+                      <button type="button" class="vc-play-btn" data-speaker="priya" aria-label="Preview Priya voice" title="Preview Priya voice" onclick="previewVoice('priya', event)">
+                        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <polygon points="7,4 20,12 7,20"></polygon>
+                        </svg>
+                        <div class="eq-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                      </button>
+                      <span class="vc-play-status" id="vps-priya"></span>
+                    </div>
                   </div>
 
                 </div>
@@ -3296,6 +3533,14 @@
       let adminSession = {};
       let cfgHasUnsavedChanges = false;
       let currentSimMode = 'book';
+      const VOICE_IDS = ['simran', 'ritu', 'priya'];
+      const DEFAULT_VOICE_ID = VOICE_IDS[0];
+
+      function normalizeSpeaker(v) {
+        const speaker = (v || '').toLowerCase().trim();
+        if (speaker === 'amit') return 'priya';
+        return VOICE_IDS.includes(speaker) ? speaker : DEFAULT_VOICE_ID;
+      }
 
       // ── Dynamic name helpers ──────────────────────────────────────────────────────
       function getDynBotName() { return document.getElementById('cfg_bot_name').value.trim() || 'your clinic'; }
@@ -3323,21 +3568,21 @@
           'gu-IN': {
             simran: `"${bn} માં આપનું સ્વાગત છે. હું ${rn}, આપની appointment..."`,
             ritu: `"${bn}. ${rn} બોલે છે. Appointment માટે..."`,
-            amit: `"${bn} — ${rn} speaking. આ appointment booking..."`
+            priya: `"${bn} — ${rn} speaking. આ appointment booking..."`
           },
           'hi-IN': {
             simran: `"${bn} में आपका स्वागत है। मैं ${rn} हूँ..."`,
             ritu: `"${bn}। ${rn} बोल रही हूँ। Appointment के लिए..."`,
-            amit: `"${bn} — ${rn} speaking. Appointment booking..."`
+            priya: `"${bn} — ${rn} speaking. Appointment booking..."`
           },
           'en-IN': {
             simran: `"Welcome to ${bn}. I'm ${rn}, your assistant..."`,
             ritu: `"${bn}. This is ${rn}. How may I help..."`,
-            amit: `"${bn} — ${rn} speaking. How can I assist..."`
+            priya: `"${bn} — ${rn} speaking. How can I assist..."`
           }
         };
         const s = samples[lang] || samples['gu-IN'];
-        ['simran', 'ritu', 'amit'].forEach(v => {
+        VOICE_IDS.forEach(v => {
           const el = document.getElementById(v + '-sample');
           if (el && s[v]) el.textContent = s[v];
         });
@@ -3437,6 +3682,7 @@
 
       // ── Config inner tabs ─────────────────────────────────────────────────────────
       function switchConfigTab(name, el) {
+        stopVoicePreview();
         document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active'));
         document.getElementById('cpanel-' + name).classList.add('active');
@@ -3445,7 +3691,114 @@
       }
 
       // ── Voice & language selectors ────────────────────────────────────────────────
+      let voicePreviewAudio = null;
+      let voicePreviewUrl = null;
+      let voicePreviewLoading = false;
+      let activePreviewSpeaker = null;
+
+      function _vpEl(speaker) {
+        return document.querySelector(`.vc-play-btn[data-speaker="${speaker}"]`);
+      }
+
+      function setVoicePreviewState(speaker, state) {
+        const btn = _vpEl(speaker);
+        const status = document.getElementById(`vps-${speaker}`);
+        if (!btn) return;
+        btn.classList.remove('loading', 'playing');
+        if (state === 'loading') {
+          btn.disabled = true;
+          btn.classList.add('loading');
+          btn.setAttribute('aria-label', `Loading ${speaker} preview`);
+          btn.setAttribute('title', `Loading ${speaker} preview`);
+          if (status) status.textContent = 'Preparing sample...';
+          if (status) status.classList.add('active');
+          return;
+        }
+        if (state === 'playing') {
+          btn.disabled = false;
+          btn.classList.add('playing');
+          btn.setAttribute('aria-label', `Stop ${speaker} preview`);
+          btn.setAttribute('title', `Stop ${speaker} preview`);
+          if (status) status.textContent = 'Playing';
+          if (status) status.classList.add('active');
+          return;
+        }
+        btn.disabled = false;
+        const labelSpeaker = speaker.charAt(0).toUpperCase() + speaker.slice(1);
+        btn.setAttribute('aria-label', `Preview ${labelSpeaker} voice`);
+        btn.setAttribute('title', `Preview ${labelSpeaker} voice`);
+        if (status) status.textContent = '';
+        if (status) status.classList.remove('active');
+      }
+
+      function stopVoicePreview() {
+        if (voicePreviewAudio) {
+          try { voicePreviewAudio.pause(); } catch (e) { }
+          voicePreviewAudio = null;
+        }
+        if (voicePreviewUrl) {
+          try { URL.revokeObjectURL(voicePreviewUrl); } catch (e) { }
+          voicePreviewUrl = null;
+        }
+        voicePreviewLoading = false;
+        activePreviewSpeaker = null;
+        VOICE_IDS.forEach(s => setVoicePreviewState(s, 'idle'));
+      }
+
+      function b64ToBlob(base64, mimeType) {
+        const clean = (base64 || '').includes('base64,') ? base64.split('base64,')[1] : (base64 || '');
+        const binary = atob(clean);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+        return new Blob([bytes], { type: mimeType });
+      }
+
+      async function previewVoice(speaker, event) {
+        if (event) { event.preventDefault(); event.stopPropagation(); }
+        speaker = normalizeSpeaker(speaker);
+        if (voicePreviewLoading) return;
+
+        if (activePreviewSpeaker === speaker && voicePreviewAudio && !voicePreviewAudio.paused) {
+          stopVoicePreview();
+          return;
+        }
+
+        stopVoicePreview();
+        voicePreviewLoading = true;
+        activePreviewSpeaker = speaker;
+        setVoicePreviewState(speaker, 'loading');
+
+        try {
+          const languageCode = document.getElementById('cfg_language_code').value || 'gu-IN';
+          const res = await apiFetch('/admin/voice-preview', {
+            method: 'POST',
+            body: JSON.stringify({ speaker, language_code: languageCode })
+          });
+          if (!res || !res.audio) throw new Error('No audio returned');
+
+          const format = (res.format || 'wav').toLowerCase();
+          const blob = b64ToBlob(res.audio, format === 'wav' ? 'audio/wav' : 'audio/mpeg');
+          voicePreviewUrl = URL.createObjectURL(blob);
+          voicePreviewAudio = new Audio(voicePreviewUrl);
+          voicePreviewAudio.onended = () => stopVoicePreview();
+          voicePreviewAudio.onerror = () => {
+            stopVoicePreview();
+            showToast('Could not play voice preview', 'error');
+          };
+
+          voicePreviewLoading = false;
+          setVoicePreviewState(speaker, 'playing');
+          await voicePreviewAudio.play();
+        } catch (e) {
+          stopVoicePreview();
+          showToast('Voice preview failed: ' + (e.message || e), 'error');
+        }
+      }
+
       function selectVoice(v) {
+        v = normalizeSpeaker(v);
+        stopVoicePreview();
         document.querySelectorAll('.voice-card').forEach(c => c.classList.remove('selected'));
         document.getElementById('vc-' + v).classList.add('selected');
         document.getElementById('cfg_tts_speaker').value = v;
@@ -3453,6 +3806,7 @@
         refreshDynamicNames();
       }
       function selectLang(l) {
+        stopVoicePreview();
         document.querySelectorAll('.lang-card').forEach(c => c.classList.remove('selected'));
         document.getElementById('lc-' + l).classList.add('selected');
         document.getElementById('cfg_language_code').value = l;
@@ -3595,7 +3949,7 @@
           business_description: document.getElementById('cfg_business_description').value,
           greeting_message: document.getElementById('cfg_greeting_message').value,
           language_code: document.getElementById('cfg_language_code').value,
-          tts_speaker: document.getElementById('cfg_tts_speaker').value,
+          tts_speaker: normalizeSpeaker(document.getElementById('cfg_tts_speaker').value),
           business_hours_start: parseInt(document.getElementById('cfg_business_hours_start').value) || 9,
           business_hours_end: parseInt(document.getElementById('cfg_business_hours_end').value) || 18,
           slot_duration_mins: parseInt(document.getElementById('cfg_slot_duration_mins').value) || 30,
@@ -3612,14 +3966,15 @@
           document.getElementById('cfg_business_description').value = cfg.business_description || '';
           document.getElementById('cfg_greeting_message').value = cfg.greeting_message || '';
           document.getElementById('cfg_language_code').value = cfg.language_code || 'gu-IN';
-          document.getElementById('cfg_tts_speaker').value = cfg.tts_speaker || 'simran';
+          const speaker = normalizeSpeaker(cfg.tts_speaker || DEFAULT_VOICE_ID);
+          document.getElementById('cfg_tts_speaker').value = speaker;
           document.getElementById('cfg_business_hours_start').value = cfg.business_hours_start ?? 9;
           document.getElementById('cfg_business_hours_end').value = cfg.business_hours_end ?? 18;
           document.getElementById('cfg_slot_duration_mins').value = cfg.slot_duration_mins || 30;
           document.getElementById('cfg_silence_timeout_ms').value = cfg.silence_timeout_ms || 1500;
           document.getElementById('cfg_extra_prompt_context').value = cfg.extra_prompt_context || '';
           // Sync visual selectors
-          selectVoiceUI(cfg.tts_speaker || 'simran');
+          selectVoiceUI(speaker);
           selectLangUI(cfg.language_code || 'gu-IN');
           updateHoursVisual();
           updateWordCount();
@@ -3631,6 +3986,7 @@
         } catch (e) { }
       }
       function selectVoiceUI(v) {
+        v = normalizeSpeaker(v);
         document.querySelectorAll('.voice-card').forEach(c => c.classList.remove('selected'));
         const el = document.getElementById('vc-' + v);
         if (el) el.classList.add('selected');
