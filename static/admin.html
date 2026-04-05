@@ -132,6 +132,16 @@
       background: rgba(245, 166, 35, .06);
     }
 
+    .nav-item.locked {
+      opacity: .55;
+      cursor: pointer;
+    }
+
+    .nav-item.locked:hover {
+      color: var(--muted);
+      background: rgba(255, 255, 255, .01);
+    }
+
     .nav-icon {
       font-size: 16px;
       width: 20px;
@@ -1227,6 +1237,45 @@
       display: block;
     }
 
+    .booking-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .booking-tab {
+      padding: 8px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      transition: all .2s;
+      user-select: none;
+    }
+
+    .booking-tab:hover {
+      color: var(--text);
+      border-color: rgba(245, 166, 35, .35);
+    }
+
+    .booking-tab.active {
+      color: var(--accent);
+      border-color: rgba(245, 166, 35, .35);
+      background: rgba(245, 166, 35, .12);
+      font-weight: 500;
+    }
+
+    .booking-panel {
+      display: none;
+    }
+
+    .booking-panel.active {
+      display: block;
+    }
+
     /* Voice persona cards */
     .voice-cards {
       display: grid;
@@ -2159,17 +2208,16 @@
         <div class="brand-sub">Admin Panel</div>
       </div>
       <div class="nav-section">Overview</div>
-      <div class="nav-item active" onclick="switchTab('dashboard')"><span class="nav-icon">📊</span>Dashboard</div>
+      <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="nav-icon">📊</span>Dashboard</div>
       <div class="nav-section">Appointments</div>
-      <div class="nav-item" onclick="switchTab('today')"><span class="nav-icon">📅</span>Today's Schedule</div>
-      <div class="nav-item" onclick="switchTab('appointments')"><span class="nav-icon">🗓</span>All Appointments</div>
+      <div class="nav-item" data-tab="today" onclick="switchTab('today')"><span class="nav-icon">📅</span>Today's Schedule</div>
+      <div class="nav-item" data-tab="appointments" onclick="switchTab('appointments')"><span class="nav-icon">🗓</span>All Appointments</div>
       <div class="nav-section">Customers</div>
-      <div class="nav-item" onclick="switchTab('customers')"><span class="nav-icon">👥</span>Customer List</div>
+      <div class="nav-item" data-tab="customers" onclick="switchTab('customers')"><span class="nav-icon">👥</span>Customer List</div>
       <div class="nav-section">Configuration</div>
-      <div class="nav-item" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
-      <div class="nav-item" onclick="switchTab('calendar')"><span class="nav-icon">📆</span>Calendar Connect</div>
-      <div class="nav-item" onclick="switchTab('modules')"><span class="nav-icon">🧩</span>Modules</div>
-      <div class="nav-item" onclick="switchTab('knowledge')"><span class="nav-icon">📚</span>Knowledge Base</div>
+      <div class="nav-item" data-tab="botconfig" onclick="switchTab('botconfig')"><span class="nav-icon">🤖</span>Bot Configuration</div>
+      <div class="nav-item" data-tab="modules" onclick="switchTab('modules')"><span class="nav-icon">🧩</span>Modules</div>
+      <div id="moduleNavContainer"></div>
       <div style="flex:1;"></div>
       <div class="nav-item" onclick="doAdminLogout()" style="color:var(--danger);"><span class="nav-icon">✕</span>Logout
       </div>
@@ -2295,7 +2343,6 @@
               <div class="config-tabs">
                 <div class="config-tab active" onclick="switchConfigTab('identity',this)">Identity</div>
                 <div class="config-tab" onclick="switchConfigTab('voice',this)">Voice &amp; Language</div>
-                <div class="config-tab" onclick="switchConfigTab('hours',this)">Hours &amp; Slots</div>
                 <div class="config-tab" onclick="switchConfigTab('teach',this)">Teach <span
                     id="cfgTabBotName">Shelvi</span></div>
                 <div class="config-tab" onclick="switchConfigTab('preview',this)">Live Preview</div>
@@ -2426,55 +2473,6 @@
                     </div>
                   </div>
                   <input type="hidden" id="cfg_language_code" value="gu-IN" />
-                </div>
-              </div>
-
-              <!-- HOURS PANEL -->
-              <div class="config-panel" id="cpanel-hours">
-                <div class="form-grid">
-                  <div class="form-field">
-                    <label>Opening Hour (24h)</label>
-                    <input type="number" id="cfg_business_hours_start" min="0" max="23" placeholder="9"
-                      oninput="onCfgChange();updateHoursVisual()" />
-                  </div>
-                  <div class="form-field">
-                    <label>Closing Hour (24h)</label>
-                    <input type="number" id="cfg_business_hours_end" min="1" max="24" placeholder="18"
-                      oninput="onCfgChange();updateHoursVisual()" />
-                  </div>
-                </div>
-
-                <div class="hours-visual">
-                  <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Open hours — patients can book
-                    within this window</div>
-                  <div class="hours-bar-track">
-                    <div class="hours-bar-fill" id="hoursBarFill" style="left:37.5%;width:37.5%;"></div>
-                  </div>
-                  <div class="hours-labels">
-                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
-                  </div>
-                  <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text);" id="hoursReadout">9:00
-                    AM — 6:00 PM</div>
-                </div>
-
-                <div class="form-grid" style="margin-top:20px;">
-                  <div class="form-field">
-                    <label>Appointment Slot Duration</label>
-                    <select id="cfg_slot_duration_mins" onchange="onCfgChange()">
-                      <option value="15">15 min — Quick consultations</option>
-                      <option value="30" selected>30 min — Standard slot</option>
-                      <option value="45">45 min — Extended slot</option>
-                      <option value="60">60 min — Full hour</option>
-                      <option value="90">90 min — Long session</option>
-                    </select>
-                  </div>
-                  <div class="form-field">
-                    <label>Silence Timeout (ms)</label>
-                    <input type="number" id="cfg_silence_timeout_ms" min="500" max="4000" placeholder="1500"
-                      oninput="onCfgChange()" />
-                    <span style="font-size:11px;color:var(--muted);margin-top:2px;">How long Shelvi waits after silence
-                      before responding. 1500ms is recommended.</span>
-                  </div>
                 </div>
               </div>
 
@@ -2639,9 +2637,79 @@
           </div>
         </div>
 
-        <!-- CALENDAR TAB — WIZARD -->
-        <div class="tab-panel" id="tab-calendar">
+        <!-- BOOKING MODULE TAB -->
+        <div class="tab-panel" id="tab-booking">
 
+          <div class="section-card" style="margin-bottom:14px;">
+            <div class="section-card-header">
+              <h3>Booking Module</h3>
+              <button class="btn btn-ghost btn-sm" onclick="requestModuleChange('BOOKING_MODULE', false)">Request Disable</button>
+            </div>
+            <div class="section-card-body">
+              <div class="booking-tabs">
+                <div class="booking-tab active" onclick="switchBookingTab('hours',this)">Hours &amp; Slots</div>
+                <div class="booking-tab" onclick="switchBookingTab('calendar',this)">Calendar Connect</div>
+              </div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.65;">
+                Manage booking module features from here. Use tabs to switch between services.
+              </div>
+            </div>
+          </div>
+
+          <div class="booking-panel active" id="bpanel-hours">
+            <div class="section-card">
+              <div class="section-card-header">
+                <h3>Hours &amp; Slots</h3>
+              </div>
+              <div class="section-card-body">
+                <div class="form-field" style="margin-top:4px;">
+                  <label>Available Time Periods</label>
+                  <div id="hoursPeriodsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+                  <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="addHoursPeriod()">+ Add Time Period</button>
+                  <div style="font-size:11px;color:var(--muted);margin-top:6px;">Add one or more periods like 09:00-13:00 and 16:00-19:00.</div>
+                </div>
+
+                <div class="hours-visual">
+                  <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Open hours — patients can book
+                    within this window</div>
+                  <div class="hours-bar-track" id="hoursBarTrack"></div>
+                  <div class="hours-labels">
+                    <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
+                  </div>
+                  <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text);" id="hoursReadout">09:00 — 18:00</div>
+                </div>
+
+                <div class="form-grid" style="margin-top:20px;">
+                  <div class="form-field">
+                    <label>Appointment Slot Duration</label>
+                    <select id="cfg_slot_duration_mins" onchange="onCfgChange()">
+                      <option value="15">15 min — Quick consultations</option>
+                      <option value="30" selected>30 min — Standard slot</option>
+                      <option value="45">45 min — Extended slot</option>
+                      <option value="60">60 min — Full hour</option>
+                      <option value="90">90 min — Long session</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label>Silence Timeout (ms)</label>
+                    <input type="number" id="cfg_silence_timeout_ms" min="500" max="4000" placeholder="1500"
+                      oninput="onCfgChange()" />
+                    <span style="font-size:11px;color:var(--muted);margin-top:2px;">How long Shelvi waits after silence
+                      before responding. 1500ms is recommended.</span>
+                  </div>
+                </div>
+
+                <div class="form-actions" style="border-top:1px solid var(--border);padding-top:16px;margin-top:14px;">
+                  <button class="btn btn-primary" onclick="saveBookingConfig()">💾 Save Configuration</button>
+                  <button class="btn btn-ghost" onclick="loadBotConfig()">↺ Reset to Saved</button>
+                  <span id="bookingSaveStatusMsg"
+                    style="font-size:12px;color:var(--muted);margin-left:4px;align-self:center;"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="booking-panel" id="bpanel-calendar">
           <!-- Connected banner -->
           <div id="cal-connected-banner" style="display:none;margin-bottom:20px;">
             <div class="cal-complete-card">
@@ -2976,8 +3044,8 @@
 
             </div>
           </div>
+          </div>
         </div>
-
 
         <!-- MODULES TAB -->
         <div class="tab-panel" id="tab-modules">
@@ -3004,8 +3072,20 @@
           </div>
         </div>
 
-        <!-- KNOWLEDGE BASE TAB -->
-        <div class="tab-panel" id="tab-knowledge">
+        <!-- FACTS MODULE TAB -->
+        <div class="tab-panel" id="tab-facts">
+
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Facts Module Settings</h3>
+              <button class="btn btn-ghost btn-sm" onclick="requestModuleChange('FACTS_MODULE', false)">Request Disable</button>
+            </div>
+            <div class="section-card-body">
+              <div style="font-size:13px;color:var(--muted);line-height:1.65;">
+                Add business facts and FAQs so your assistant can answer common customer questions accurately.
+              </div>
+            </div>
+          </div>
 
           <!-- Friendly welcome banner -->
           <div
@@ -3204,31 +3284,57 @@
       const MODULE_META = {
         BOOKING_MODULE: {
           icon: '📅',
-          title: 'Appointment Booking',
+          title: 'Booking Module',
+          tab: 'booking',
           description: 'Lets your AI assistant book, cancel, and reschedule appointments with customers over phone — connected to your Google Calendar.',
           benefit: 'Great for clinics, salons, and any business that takes appointments.',
         },
         FACTS_MODULE: {
           icon: '📚',
-          title: 'Business Info & FAQ',
-          description: 'Your AI will answer customer questions about your address, hours, prices, services — using the information you add in the Knowledge Base tab.',
+          title: 'Facts Module',
+          tab: 'facts',
+          description: 'Your AI will answer customer questions about your address, hours, prices, services — using the information you add in this module.',
           benefit: 'Perfect for handling common questions without you having to pick up every call.',
         },
       };
 
-      async function loadModules() {
-        const body = document.getElementById('modulesBody');
-        body.innerHTML = '<div class="empty-state"><span>&#129513;</span>Loading...</div>';
-        try {
-          const modules = await apiFetch('/admin/modules');
-          if (!modules || modules.length === 0) {
-            body.innerHTML = '<div class="empty-state"><span>&#129513;</span>No modules found.</div>';
-            return;
+      let moduleStateByName = {};
+      let moduleTabByName = {};
+
+      function renderModuleNav(modules) {
+        const nav = document.getElementById('moduleNavContainer');
+        if (!nav) return;
+        if (!modules || modules.length === 0) {
+          nav.innerHTML = '<div class="nav-item locked"><span class="nav-icon">🧩</span>No modules found</div>';
+          return;
+        }
+        moduleStateByName = {};
+        moduleTabByName = {};
+        nav.innerHTML = modules.map(m => {
+          const meta = MODULE_META[m.module_name] || { icon: '🧩', title: m.module_name, description: '' };
+          const tab = meta.tab;
+          const enabled = !!m.is_enabled;
+          moduleStateByName[m.module_name] = enabled;
+          if (tab) moduleTabByName[m.module_name] = tab;
+          if (!tab) return '';
+          if (enabled) {
+            return `<div class="nav-item module-nav-item" data-tab="${tab}" onclick="switchTab('${tab}')"><span class="nav-icon">${meta.icon}</span>${meta.title}</div>`;
           }
-          body.innerHTML = modules.map(m => {
-            const meta = MODULE_META[m.module_name] || { icon: '🧩', title: m.module_name, description: '', benefit: '' };
-            const enabled = m.is_enabled;
-            return `
+          return `<div class="nav-item module-nav-item locked" data-tab="${tab}" title="This module isn’t active on your plan yet" onclick="onLockedModuleClick('${m.module_name}')"><span class="nav-icon">${meta.icon}</span>${meta.title} <span aria-hidden="true">🔒</span></div>`;
+        }).join('');
+      }
+
+      function renderModulesBody(modules) {
+        const body = document.getElementById('modulesBody');
+        if (!body) return;
+        if (!modules || modules.length === 0) {
+          body.innerHTML = '<div class="empty-state"><span>&#129513;</span>No modules found.</div>';
+          return;
+        }
+        body.innerHTML = modules.map(m => {
+          const meta = MODULE_META[m.module_name] || { icon: '🧩', title: m.module_name, description: '', benefit: '' };
+          const enabled = m.is_enabled;
+          return `
             <div style="background:var(--panel);border:1px solid ${enabled ? 'rgba(34,197,94,.3)' : 'var(--border)'};border-radius:12px;padding:20px 22px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;transition:border .2s;">
               <div style="flex:1;">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
@@ -3241,16 +3347,36 @@
               </div>
               <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
                 ${enabled
-                ? `<div style="font-size:12px;color:var(--success);font-weight:600;display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;box-shadow:0 0 6px var(--success);"></span>Running</div>
+              ? `<div style="font-size:12px;color:var(--success);font-weight:600;display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;box-shadow:0 0 6px var(--success);"></span>Running</div>
                      <button class="btn btn-ghost btn-sm" onclick="requestModuleChange('${m.module_name}', false)" style="font-size:11px;color:var(--muted);">Request Disable</button>`
-                : `<button class="btn btn-primary btn-sm" onclick="requestModuleChange('${m.module_name}', true)" style="white-space:nowrap;">Request Access →</button>`
-              }
+              : `<button class="btn btn-primary btn-sm" onclick="requestModuleChange('${m.module_name}', true)" style="white-space:nowrap;">Request Access →</button>`
+            }
               </div>
             </div>`;
-          }).join('');
+        }).join('');
+      }
+
+      async function loadModules() {
+        const nav = document.getElementById('moduleNavContainer');
+        if (nav) nav.innerHTML = '<div class="nav-item locked"><span class="nav-icon">🧩</span>Loading modules...</div>';
+        const body = document.getElementById('modulesBody');
+        if (body) body.innerHTML = '<div class="empty-state"><span>&#129513;</span>Loading modules...</div>';
+        try {
+          const modules = await apiFetch('/admin/modules');
+          renderModuleNav(modules);
+          renderModulesBody(modules);
+          const activePanel = document.querySelector('.tab-panel.active');
+          if (activePanel) markActiveNav(activePanel.id.replace('tab-', ''));
         } catch (e) {
-          body.innerHTML = `<div class="empty-state" style="color:var(--danger);">&#9888; ${e.message}</div>`;
+          if (nav) nav.innerHTML = '<div class="nav-item locked"><span class="nav-icon">⚠</span>Modules unavailable</div>';
+          if (body) body.innerHTML = `<div class="empty-state" style="color:var(--danger);">&#9888; ${e.message}</div>`;
         }
+      }
+
+      function onLockedModuleClick(moduleName) {
+        const meta = MODULE_META[moduleName] || { title: moduleName };
+        showToast(`You are not using ${meta.title} yet. You can request access now.`, '');
+        requestModuleChange(moduleName, true);
       }
 
       function requestModuleChange(moduleName, enable) {
@@ -3660,24 +3786,43 @@
       const tabTitles = {
         dashboard: 'Dashboard', today: "Today's Schedule",
         appointments: 'All Appointments', customers: 'Customers',
-        botconfig: 'Bot Configuration', calendar: 'Calendar Connect',
-        modules: 'Module Configuration', knowledge: 'Knowledge Base'
+        modules: 'Module Configuration',
+        botconfig: 'Bot Configuration',
+        booking: 'Booking Module',
+        facts: 'Facts Module'
       };
+
+      function markActiveNav(name) {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        const navItem = document.querySelector(`.nav-item[data-tab="${name}"]`);
+        if (navItem) navItem.classList.add('active');
+      }
+
       function switchTab(name) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        document.getElementById('tab-' + name).classList.add('active');
-        document.querySelectorAll('.nav-item').forEach(n => {
-          if (n.textContent.trim().toLowerCase().includes(name === 'today' ? "today" : name === 'botconfig' ? 'bot' : name === 'calendar' ? 'calendar' : name))
-            n.classList.add('active');
-        });
+        const tab = document.getElementById('tab-' + name);
+        if (!tab) return;
+        tab.classList.add('active');
+        markActiveNav(name);
         document.getElementById('topBarTitle').textContent = tabTitles[name] || name;
         document.getElementById('unsavedIndicator').style.display = (name === 'botconfig' && cfgHasUnsavedChanges) ? 'inline' : 'none';
         if (name === 'customers') loadCustomers();
         if (name === 'today') loadAppointmentsForDate();
         if (name === 'botconfig') { refreshDynamicNames(); updateHoursVisual(); }
+        if (name === 'booking') updateHoursVisual();
+        if (name === 'booking') checkCalendarStatus();
         if (name === 'modules') loadModules();
-        if (name === 'knowledge') loadKnowledge();
+        if (name === 'facts') loadKnowledge();
+      }
+
+      function switchBookingTab(name, el) {
+        document.querySelectorAll('.booking-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.booking-tab').forEach(t => t.classList.remove('active'));
+        const panel = document.getElementById('bpanel-' + name);
+        if (panel) panel.classList.add('active');
+        if (el) el.classList.add('active');
+        if (name === 'calendar') checkCalendarStatus();
+        if (name === 'hours') updateHoursVisual();
       }
 
       // ── Config inner tabs ─────────────────────────────────────────────────────────
@@ -3815,16 +3960,80 @@
       }
 
       // ── Hours visual ──────────────────────────────────────────────────────────────
+      function defaultHoursPeriods() {
+        return [{ start: '09:00', end: '18:00' }];
+      }
+      function normTime(v, fallback) {
+        if (!v || typeof v !== 'string') return fallback;
+        const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(v.trim());
+        return m ? `${m[1]}:${m[2]}` : fallback;
+      }
+      function getHoursPeriods() {
+        const rows = Array.from(document.querySelectorAll('.hours-period-row'));
+        const periods = rows.map((row) => {
+          const s = row.querySelector('.hours-start')?.value;
+          const e = row.querySelector('.hours-end')?.value;
+          return { start: normTime(s, '09:00'), end: normTime(e, '18:00') };
+        }).filter((p) => p.start < p.end);
+        return periods.length ? periods : defaultHoursPeriods();
+      }
+      function removeHoursPeriod(btn) {
+        const row = btn.closest('.hours-period-row');
+        if (row) row.remove();
+        if (!document.querySelector('.hours-period-row')) addHoursPeriod();
+        onCfgChange();
+        updateHoursVisual();
+      }
+      function addHoursPeriod(period = { start: '09:00', end: '18:00' }) {
+        const list = document.getElementById('hoursPeriodsList');
+        if (!list) return;
+        const row = document.createElement('div');
+        row.className = 'hours-period-row';
+        row.style.display = 'grid';
+        row.style.gridTemplateColumns = '1fr 1fr auto';
+        row.style.gap = '8px';
+        row.innerHTML = `
+          <input type="time" class="hours-start" value="${normTime(period.start, '09:00')}" oninput="onCfgChange();updateHoursVisual()" />
+          <input type="time" class="hours-end" value="${normTime(period.end, '18:00')}" oninput="onCfgChange();updateHoursVisual()" />
+          <button class="btn btn-ghost btn-sm" onclick="removeHoursPeriod(this)" title="Remove period">Remove</button>
+        `;
+        list.appendChild(row);
+        updateHoursVisual();
+      }
+      function setHoursPeriods(periods) {
+        const list = document.getElementById('hoursPeriodsList');
+        if (!list) return;
+        list.innerHTML = '';
+        const use = (Array.isArray(periods) && periods.length) ? periods : defaultHoursPeriods();
+        use.forEach((p) => addHoursPeriod({ start: p.start, end: p.end }));
+        updateHoursVisual();
+      }
       function updateHoursVisual() {
-        const start = parseInt(document.getElementById('cfg_business_hours_start').value) || 9;
-        const end = parseInt(document.getElementById('cfg_business_hours_end').value) || 18;
-        const left = (start / 24) * 100;
-        const width = Math.max(0, ((end - start) / 24) * 100);
-        const fill = document.getElementById('hoursBarFill');
-        if (fill) { fill.style.left = left + '%'; fill.style.width = width + '%'; }
-        const fmt = h => { const ampm = h < 12 ? 'AM' : 'PM'; const hh = h % 12 || 12; return hh + ':00 ' + ampm; };
+        const periods = getHoursPeriods();
+        const track = document.getElementById('hoursBarTrack');
+        if (track) {
+          track.innerHTML = '';
+          periods.forEach((p) => {
+            const [sh, sm] = p.start.split(':').map(Number);
+            const [eh, em] = p.end.split(':').map(Number);
+            const sMin = sh * 60 + sm;
+            const eMin = eh * 60 + em;
+            const fill = document.createElement('div');
+            fill.className = 'hours-bar-fill';
+            fill.style.left = `${(sMin / 1440) * 100}%`;
+            fill.style.width = `${Math.max(0, ((eMin - sMin) / 1440) * 100)}%`;
+            track.appendChild(fill);
+          });
+        }
+        const fmt = (hhmm) => {
+          const [hRaw, mRaw] = hhmm.split(':').map(Number);
+          const ampm = hRaw < 12 ? 'AM' : 'PM';
+          const hh = hRaw % 12 || 12;
+          const mm = String(mRaw).padStart(2, '0');
+          return `${hh}:${mm} ${ampm}`;
+        };
         const ro = document.getElementById('hoursReadout');
-        if (ro) ro.textContent = fmt(start) + ' — ' + fmt(end);
+        if (ro) ro.textContent = periods.map((p) => `${fmt(p.start)} — ${fmt(p.end)}`).join(' | ');
       }
 
       // ── Context pills ─────────────────────────────────────────────────────────────
@@ -3852,6 +4061,8 @@
         cfgHasUnsavedChanges = true;
         document.getElementById('unsavedIndicator').style.display = 'inline';
         document.getElementById('saveStatusMsg').textContent = 'Unsaved changes';
+        const bookingMsg = document.getElementById('bookingSaveStatusMsg');
+        if (bookingMsg) bookingMsg.textContent = 'Unsaved changes';
         refreshDynamicNames();
       }
 
@@ -3943,6 +4154,10 @@
 
       // ── Bot config ────────────────────────────────────────────────────────────────
       function getCurrentCfg() {
+        const periods = getHoursPeriods();
+        const first = periods[0] || { start: '09:00', end: '18:00' };
+        const startHour = parseInt(first.start.split(':')[0], 10);
+        const endHour = parseInt(first.end.split(':')[0], 10);
         return {
           bot_name: document.getElementById('cfg_bot_name').value,
           receptionist_name: document.getElementById('cfg_receptionist_name').value,
@@ -3950,8 +4165,9 @@
           greeting_message: document.getElementById('cfg_greeting_message').value,
           language_code: document.getElementById('cfg_language_code').value,
           tts_speaker: normalizeSpeaker(document.getElementById('cfg_tts_speaker').value),
-          business_hours_start: parseInt(document.getElementById('cfg_business_hours_start').value) || 9,
-          business_hours_end: parseInt(document.getElementById('cfg_business_hours_end').value) || 18,
+          business_hours_start: Number.isFinite(startHour) ? startHour : 9,
+          business_hours_end: Number.isFinite(endHour) ? endHour : 18,
+          business_hours_periods: periods,
           slot_duration_mins: parseInt(document.getElementById('cfg_slot_duration_mins').value) || 30,
           silence_timeout_ms: parseInt(document.getElementById('cfg_silence_timeout_ms').value) || 1500,
           extra_prompt_context: document.getElementById('cfg_extra_prompt_context').value,
@@ -3960,7 +4176,10 @@
       async function loadBotConfig() {
         try {
           const cfg = await apiFetch('/admin/bot-config');
-          if (!cfg || !cfg.config_id) return;
+          if (!cfg || !cfg.config_id) {
+            setHoursPeriods(defaultHoursPeriods());
+            return;
+          }
           document.getElementById('cfg_bot_name').value = cfg.bot_name || '';
           document.getElementById('cfg_receptionist_name').value = cfg.receptionist_name || '';
           document.getElementById('cfg_business_description').value = cfg.business_description || '';
@@ -3968,8 +4187,10 @@
           document.getElementById('cfg_language_code').value = cfg.language_code || 'gu-IN';
           const speaker = normalizeSpeaker(cfg.tts_speaker || DEFAULT_VOICE_ID);
           document.getElementById('cfg_tts_speaker').value = speaker;
-          document.getElementById('cfg_business_hours_start').value = cfg.business_hours_start ?? 9;
-          document.getElementById('cfg_business_hours_end').value = cfg.business_hours_end ?? 18;
+          const periods = Array.isArray(cfg.business_hours_periods) && cfg.business_hours_periods.length
+            ? cfg.business_hours_periods
+            : [{ start: `${String(cfg.business_hours_start ?? 9).padStart(2, '0')}:00`, end: `${String(cfg.business_hours_end ?? 18).padStart(2, '0')}:00` }];
+          setHoursPeriods(periods);
           document.getElementById('cfg_slot_duration_mins').value = cfg.slot_duration_mins || 30;
           document.getElementById('cfg_silence_timeout_ms').value = cfg.silence_timeout_ms || 1500;
           document.getElementById('cfg_extra_prompt_context').value = cfg.extra_prompt_context || '';
@@ -3983,6 +4204,8 @@
           cfgHasUnsavedChanges = false;
           document.getElementById('unsavedIndicator').style.display = 'none';
           document.getElementById('saveStatusMsg').textContent = '';
+          const bookingMsg = document.getElementById('bookingSaveStatusMsg');
+          if (bookingMsg) bookingMsg.textContent = '';
         } catch (e) { }
       }
       function selectVoiceUI(v) {
@@ -4005,17 +4228,47 @@
           cfgHasUnsavedChanges = false;
           document.getElementById('unsavedIndicator').style.display = 'none';
           document.getElementById('saveStatusMsg').textContent = 'Saved';
+          const bookingMsg = document.getElementById('bookingSaveStatusMsg');
+          if (bookingMsg) bookingMsg.textContent = '';
           setTimeout(() => { document.getElementById('saveStatusMsg').textContent = ''; }, 3000);
         } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+      }
+      async function saveBookingConfig() {
+        const cfg = getCurrentCfg();
+        const body = {
+          business_hours_start: cfg.business_hours_start,
+          business_hours_end: cfg.business_hours_end,
+          business_hours_periods: cfg.business_hours_periods,
+          slot_duration_mins: cfg.slot_duration_mins,
+          silence_timeout_ms: cfg.silence_timeout_ms,
+        };
+        try {
+          await apiFetch('/admin/bot-config', { method: 'POST', body: JSON.stringify(body) });
+          showToast('Booking settings saved ✓', 'success');
+          updatePromptPreview(getCurrentCfg());
+          cfgHasUnsavedChanges = false;
+          document.getElementById('unsavedIndicator').style.display = 'none';
+          const bookingMsg = document.getElementById('bookingSaveStatusMsg');
+          if (bookingMsg) {
+            bookingMsg.textContent = 'Saved';
+            setTimeout(() => { bookingMsg.textContent = ''; }, 3000);
+          }
+          document.getElementById('saveStatusMsg').textContent = '';
+        } catch (e) {
+          showToast('Save failed: ' + e.message, 'error');
+        }
       }
       function updatePromptPreview(cfg) {
         const today = new Date().toISOString().split('T')[0];
         const day = new Date().toLocaleDateString('en-US', { weekday: 'long' });
         const rn = cfg.receptionist_name || 'Priya';
         const bn = cfg.bot_name || 'SamaySetu AI';
+        const periods = (cfg.business_hours_periods && cfg.business_hours_periods.length)
+          ? cfg.business_hours_periods.map((p) => `${p.start} to ${p.end}`).join(', ')
+          : `${cfg.business_hours_start ?? 9}:00 to ${cfg.business_hours_end ?? 18}:00`;
         const preview = `You are ${rn}, AI receptionist at ${bn} — ${cfg.business_description || 'a professional appointment booking service'}.
 Today: ${today} (${day}). All times in IST.
-Business hours: ${cfg.business_hours_start ?? 9}:00 to ${cfg.business_hours_end ?? 18}:00. Default slot: ${cfg.slot_duration_mins || 30} minutes.
+Business hours: ${periods}. Default slot: ${cfg.slot_duration_mins || 30} minutes.
 ${cfg.greeting_message ? 'Greeting: ' + cfg.greeting_message : ''}
 ${cfg.extra_prompt_context ? 'Additional context: ' + cfg.extra_prompt_context : ''}
 [... booking rules, memory state, tool definitions appended automatically ...]`;

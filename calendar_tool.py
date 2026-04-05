@@ -103,14 +103,74 @@ def is_past_time(start_time_str: str) -> bool:
     return start_dt <= now_dt
 
 
-def is_within_business_hours(start_time_str: str) -> bool:
+def _time_to_minutes(t: str) -> Optional[int]:
+    try:
+        hh, mm = t.split(":")
+        hh_i, mm_i = int(hh), int(mm)
+    except Exception:
+        return None
+    if hh_i == 24 and mm_i == 0:
+        return 24 * 60
+    if 0 <= hh_i <= 23 and 0 <= mm_i <= 59:
+        return hh_i * 60 + mm_i
+    return None
+
+
+def _normalize_business_periods(bot_cfg: dict):
+    """
+    Return availability periods as minute-ranges: [(start_min, end_min), ...]
+    Supports:
+      - new format: business_hours_periods=[{"start":"09:00","end":"13:00"}, ...]
+      - legacy format: business_hours_start/business_hours_end
+    """
+    periods = []
+    raw = bot_cfg.get("business_hours_periods") or []
+    if isinstance(raw, list):
+        for p in raw:
+            if not isinstance(p, dict):
+                continue
+            start = _time_to_minutes(str(p.get("start", "")).strip())
+            end = _time_to_minutes(str(p.get("end", "")).strip())
+            if start is None or end is None or start >= end:
+                continue
+            periods.append((start, end))
+
+    if not periods:
+        start_hour = int(bot_cfg.get("business_hours_start", config.BUSINESS_START_HOUR))
+        end_hour = int(bot_cfg.get("business_hours_end", config.BUSINESS_END_HOUR))
+        if start_hour < end_hour:
+            periods = [(start_hour * 60, end_hour * 60)]
+
+    return sorted(periods, key=lambda x: x[0])
+
+
+def _format_periods_for_msg(periods):
+    if not periods:
+        return "9:00 to 18:00"
+
+    def fmt(total_mins: int) -> str:
+        hh = total_mins // 60
+        mm = total_mins % 60
+        return f"{hh:02d}:{mm:02d}"
+
+    return ", ".join([f"{fmt(s)} to {fmt(e)}" for s, e in periods])
+
+
+def is_within_business_hours(start_time_str: str, duration_minutes: int = 0) -> bool:
     bot_cfg = get_tenant_config()
-    start_hour = bot_cfg.get("business_hours_start", config.BUSINESS_START_HOUR)
-    end_hour = bot_cfg.get("business_hours_end", config.BUSINESS_END_HOUR)
-    
+    periods = _normalize_business_periods(bot_cfg)
+    if not periods:
+        return False
+
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
-    hour = naive_dt.hour
-    return start_hour <= hour < end_hour
+    start_mins = naive_dt.hour * 60 + naive_dt.minute
+    end_mins = start_mins + max(0, int(duration_minutes or 0))
+
+    # Slot must fit entirely inside one selected business period.
+    for p_start, p_end in periods:
+        if start_mins >= p_start and end_mins <= p_end:
+            return True
+    return False
 
 
 # ── Tool: check_calendar_availability ────────────────────────────────────────
@@ -129,12 +189,11 @@ def check_calendar_availability(
     if is_past_time(start_time_str):
         return "Error: Cannot book an appointment in the past."
 
-    if not is_within_business_hours(start_time_str):
-        start_hour = bot_cfg.get("business_hours_start", config.BUSINESS_START_HOUR)
-        end_hour = bot_cfg.get("business_hours_end", config.BUSINESS_END_HOUR)
+    if not is_within_business_hours(start_time_str, duration_minutes=duration_minutes):
+        periods = _normalize_business_periods(bot_cfg)
         return (
-            f"Error: We only accept appointments between "
-            f"{start_hour}:00 and {end_hour}:00. "
+            f"Error: We only accept appointments during these business hours: "
+            f"{_format_periods_for_msg(periods)}. "
             "Please choose a different time."
         )
 
@@ -220,7 +279,10 @@ def suggest_next_available_slot(
                 is_busy = True
                 break
 
-        if not is_busy:
+        if not is_busy and is_within_business_hours(
+            current.strftime("%Y-%m-%dT%H:%M:%S"),
+            duration_minutes=duration_minutes
+        ):
             available_slots.append(current.strftime("%Y-%m-%dT%H:%M:%S"))
 
         current += datetime.timedelta(minutes=duration_minutes)

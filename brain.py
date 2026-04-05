@@ -24,7 +24,7 @@ from collections import Counter
 from typing import Optional, List, Dict, TYPE_CHECKING
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
@@ -316,6 +316,21 @@ def detect_requested_language(text: str) -> Optional[str]:
     return hits[0]
 
 
+def _lang_label(lang_code: str) -> str:
+    return {"en-IN": "English", "hi-IN": "Hindi", "gu-IN": "Gujarati"}.get(lang_code, lang_code)
+
+
+def _extract_hours_ranges(error_text: str) -> Optional[str]:
+    m = re.search(
+        r"business hours:\s*(.+?)\.\s*Please choose a different time",
+        error_text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
 # ── Noise / echo filters ──────────────────────────────────────────────────────
 
 COMMON_STT_VARIANTS = {
@@ -601,6 +616,7 @@ async def run_brain(
             "bot_config": None,
             "memory": {
                 "intent": None,
+                "language_preference": None,
                 "pending_action": "waiting_for_confirmation",
                 "appointment": {"date": None, "time": None, "duration": None},
                 "reschedule": {"old_time": None, "new_time": None},
@@ -609,6 +625,15 @@ async def run_brain(
         }
 
     session_data = chat_sessions[session_id]
+    # Ensure memory schema exists even when session was pre-created by websocket handler.
+    session_data.setdefault("memory", {})
+    session_data["memory"].setdefault("intent", None)
+    session_data["memory"].setdefault("language_preference", None)
+    session_data["memory"].setdefault("pending_action", "waiting_for_confirmation")
+    session_data["memory"].setdefault("appointment", {"date": None, "time": None, "duration": None})
+    session_data["memory"].setdefault("reschedule", {"old_time": None, "new_time": None})
+    session_data["memory"].setdefault("date_context", {"resolved_date": None, "source": "none"})
+    session_data.setdefault("language_prompt_asked", False)
     history      = session_data["history"]
     phone_number = session_data.get("phone_number")
     bot_config   = session_data.get("bot_config") or {}
@@ -644,7 +669,10 @@ async def run_brain(
     llm_with_tools, active_tools = llm_result
 
     # Merge + save memory
+    prev_lang_pref = memory.get("language_preference")
     updated_memory = merge_memory(memory, new_memory_result)
+    # Do not trust extracted language_preference unless explicitly requested this turn.
+    updated_memory["language_preference"] = prev_lang_pref
     print(updated_memory)
     session_data["memory"] = updated_memory
 
@@ -657,6 +685,10 @@ async def run_brain(
     # word / short answer is enough to trigger this.
     _SPEAKER_MAP = {"gu-IN": "simran", "hi-IN": "simran", "en-IN": "simran"}
     requested_lang = detect_requested_language(user_text)
+    if requested_lang:
+        updated_memory["language_preference"] = requested_lang
+        session_data["memory"] = updated_memory
+        session_data["language_prompt_asked"] = True
     if requested_lang and requested_lang != tts_lang:
         log("[LANG_SWITCH]", f"Language switched: {tts_lang} → {requested_lang}")
         tts_lang    = requested_lang
@@ -672,6 +704,46 @@ async def run_brain(
 
 
     # ── Inject tenant context into module tools ───────────────────────────────
+    # Deterministic first-turn language question:
+    # if no language chosen yet and this is first user turn, ask language now.
+    non_system_msgs = [m for m in history if not isinstance(m, SystemMessage)]
+    if (
+        not updated_memory.get("language_preference")
+        and not session_data.get("language_prompt_asked", False)
+        and len(non_system_msgs) == 0
+        and requested_lang is None
+    ):
+        receptionist = bot_config.get("receptionist_name") or "Priya"
+        question_map = {
+            "gu-IN": f"નમસ્તે! હું {receptionist} છું. તમે ગુજરાતી, હિન્દી કે અંગ્રેજીમાં વાત કરશો?",
+            "hi-IN": f"नमस्ते! मैं {receptionist} हूँ। क्या आप गुजराती, हिन्दी या अंग्रेज़ी में बात करना चाहेंगे?",
+            "en-IN": f"Hello! I'm {receptionist}. Would you prefer Gujarati, Hindi, or English?",
+        }
+        ask_text = question_map.get(tts_lang, question_map["en-IN"])
+        session_data["language_prompt_asked"] = True
+        history.append(AIMessage(content=ask_text))
+        session_data["last_ai_text"] = ask_text
+        sentences = split_into_sentences(ask_text)
+        log("[BRAIN]", f"Reply: '{ask_text[:100]}' | {len(sentences)} sentence(s) [forced language ask]")
+        await websocket.send_json({"type": "ai_text", "text": ask_text, "chunk_count": len(sentences)})
+        await websocket.send_json({"type": "ai_speaking_start"})
+        if tts_session:
+            done_evt = asyncio.Event()
+            import random as _rand
+            resp_id = _rand.randint(1, 999999)
+            await tts_session.speak(sentences, tts_speaker, tts_lang, resp_id, done_evt)
+            await done_evt.wait()
+        else:
+            for idx, sentence in enumerate(sentences):
+                audio_b64 = await tts_convert_fn(sentence, tts_speaker, tts_lang)
+                await websocket.send_json({
+                    "type": "audio_chunk", "index": idx, "total": len(sentences),
+                    "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+                })
+            await websocket.send_json({"type": "tts_done"})
+        log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
+        return
+
     _inject_tool_context(session_id, chat_sessions, enabled_modules)
 
     # ── Build system prompt ───────────────────────────────────────────────────
@@ -680,6 +752,14 @@ async def run_brain(
         prompts.get_system_prompt(today, day, bot_config, enabled_modules)
         + memory_context
     )
+    preferred_lang = updated_memory.get("language_preference")
+    if preferred_lang:
+        system_prompt += (
+            f"\n\n=== LANGUAGE LOCK ===\n"
+            f"The user has already chosen {_lang_label(preferred_lang)} ({preferred_lang}). "
+            f"Do NOT ask language preference again in this conversation. "
+            f"Reply in {_lang_label(preferred_lang)} unless user explicitly asks to switch language."
+        )
 
     if history and isinstance(history[0], SystemMessage):
         history[0] = SystemMessage(content=system_prompt)
@@ -743,10 +823,21 @@ async def run_brain(
 
             try:
                 obs = await _run_tool_async(tname, targs)
+                obs_text = str(obs)
+                if (
+                    tname == "check_calendar_availability"
+                    and "We only accept appointments during these business hours" in obs_text
+                ):
+                    session_data["_out_of_hours_error"] = {
+                        "error_text": obs_text,
+                        "requested_start": targs.get("start_time_str"),
+                    }
                 if "success" in str(obs).lower():
                     print("$$$state memory cleared after success$$$")
+                    lang_pref = session_data.get("memory", {}).get("language_preference")
                     session_data["memory"] = {
                         "intent": "none",
+                        "language_preference": lang_pref,
                         "pending_action": "waiting_for_confirmation",
                         "appointment": {"date": None, "time": None, "duration": None},
                         "reschedule": {"old_time": None, "new_time": None},
@@ -770,6 +861,33 @@ async def run_brain(
         tool_results   = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
         history.extend(tool_results)
         recent_history = [history[0]] + history[-max_history:]
+
+        out_of_hours = session_data.pop("_out_of_hours_error", None)
+        if out_of_hours:
+            ranges = _extract_hours_ranges(out_of_hours.get("error_text", "")) or "the configured business hours"
+            req_start = out_of_hours.get("requested_start")
+            req_time = None
+            if isinstance(req_start, str):
+                try:
+                    req_dt = datetime.fromisoformat(req_start)
+                    req_time = req_dt.strftime("%I:%M %p").lstrip("0")
+                except Exception:
+                    req_time = None
+
+            if req_time:
+                reply = (
+                    f"There is no slot at {req_time} because it is outside business hours. "
+                    f"We accept appointments only during {ranges}. "
+                    "Please choose a time within these periods."
+                )
+            else:
+                reply = (
+                    f"That requested time is outside business hours. "
+                    f"We accept appointments only during {ranges}. "
+                    "Please choose a time within these periods."
+                )
+            ai_msg = AIMessage(content=reply)
+            break
 
         t_llm2 = datetime.now()
         log("[LLM]", "Post-tool ainvoke()")

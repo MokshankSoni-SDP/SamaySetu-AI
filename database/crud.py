@@ -7,6 +7,7 @@ always isolated between different business owners.
 """
 
 from datetime import datetime
+import json
 from typing import Optional, List, Dict, Any
 from database.db import get_db_connection
 
@@ -69,7 +70,7 @@ def _seed_default_modules(tenant_id: str):
 def get_all_tenants() -> List[Dict[str, Any]]:
     sql = """
         SELECT t.*, bc.bot_name, bc.language_code,
-               bc.business_hours_start, bc.business_hours_end
+               bc.business_hours_start, bc.business_hours_end, bc.business_hours_periods
         FROM tenants t
         LEFT JOIN bot_configs bc ON bc.tenant_id = t.tenant_id
         ORDER BY t.created_at DESC;
@@ -78,7 +79,10 @@ def get_all_tenants() -> List[Dict[str, Any]]:
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
-            return [_serialize(r) for r in cur.fetchall()]
+            rows = [_serialize(r) for r in cur.fetchall()]
+            for row in rows:
+                _normalize_business_hours_periods(row)
+            return rows
     finally:
         conn.close()
 
@@ -179,7 +183,10 @@ def get_bot_config(tenant_id: str) -> Optional[Dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(sql, (tenant_id,))
             row = cur.fetchone()
-            return _serialize(row) if row else None
+            cfg = _serialize(row) if row else None
+            if cfg:
+                _normalize_business_hours_periods(cfg)
+            return cfg
     finally:
         conn.close()
 
@@ -190,11 +197,31 @@ def upsert_bot_config(tenant_id: str, **fields) -> Dict[str, Any]:
         "bot_name", "receptionist_name", "language_code", "tts_speaker",
         "business_hours_start", "business_hours_end", "slot_duration_mins",
         "silence_timeout_ms", "greeting_message", "business_description",
-        "extra_prompt_context", "calendar_id",
+        "extra_prompt_context", "calendar_id", "business_hours_periods",
     }
     filtered = {k: v for k, v in fields.items() if k in allowed}
     if not filtered:
         return {}
+    if "business_hours_periods" not in filtered:
+        if "business_hours_start" in filtered or "business_hours_end" in filtered:
+            try:
+                s = int(filtered.get("business_hours_start", 9))
+            except Exception:
+                s = 9
+            try:
+                e = int(filtered.get("business_hours_end", 18))
+            except Exception:
+                e = 18
+            if s < e:
+                filtered["business_hours_periods"] = json.dumps(
+                    [{"start": f"{s:02d}:00", "end": f"{e:02d}:00"}]
+                )
+    if (
+        "business_hours_periods" in filtered
+        and filtered["business_hours_periods"] is not None
+        and not isinstance(filtered["business_hours_periods"], str)
+    ):
+        filtered["business_hours_periods"] = json.dumps(filtered["business_hours_periods"])
 
     cols = ", ".join(filtered.keys())
     placeholders = ", ".join(["%s"] * len(filtered))
@@ -212,7 +239,9 @@ def upsert_bot_config(tenant_id: str, **fields) -> Dict[str, Any]:
             cur.execute(sql, (tenant_id, *filtered.values()))
             row = cur.fetchone()
             conn.commit()
-            return _serialize(row)
+            saved = _serialize(row)
+            _normalize_business_hours_periods(saved)
+            return saved
     finally:
         conn.close()
 
@@ -688,6 +717,72 @@ def _serialize(row) -> Dict[str, Any]:
         elif hasattr(v, 'hex'):       # UUID
             r[k] = str(v)
     return r
+
+
+def _normalize_business_hours_periods(cfg: Dict[str, Any]) -> None:
+    """
+    Ensure business_hours_periods is always a normalized list:
+    [{"start":"HH:MM","end":"HH:MM"}, ...]
+    Falls back to legacy business_hours_start/end when missing.
+    """
+    raw = cfg.get("business_hours_periods")
+    parsed = []
+
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = []
+    elif isinstance(raw, list):
+        parsed = raw
+
+    norm = []
+    for p in parsed if isinstance(parsed, list) else []:
+        if not isinstance(p, dict):
+            continue
+        s = p.get("start")
+        e = p.get("end")
+        s_hhmm = _to_hhmm(s)
+        e_hhmm = _to_hhmm(e)
+        if s_hhmm and e_hhmm and s_hhmm < e_hhmm:
+            norm.append({"start": s_hhmm, "end": e_hhmm})
+
+    if not norm:
+        try:
+            start = int(cfg.get("business_hours_start", 9) or 9)
+        except Exception:
+            start = 9
+        try:
+            end = int(cfg.get("business_hours_end", 18) or 18)
+        except Exception:
+            end = 18
+        if start < end:
+            norm = [{"start": f"{start:02d}:00", "end": f"{end:02d}:00"}]
+
+    cfg["business_hours_periods"] = norm
+
+
+def _to_hhmm(value) -> Optional[str]:
+    """Convert int/str clock value to HH:MM or None."""
+    if isinstance(value, int):
+        if 0 <= value <= 24:
+            return f"{value:02d}:00" if value < 24 else "24:00"
+        return None
+    if isinstance(value, str):
+        txt = value.strip()
+        parts = txt.split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            hh = int(parts[0])
+            mm = int(parts[1])
+        except Exception:
+            return None
+        if hh == 24 and mm == 0:
+            return "24:00"
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return f"{hh:02d}:{mm:02d}"
+    return None
 
 
 # ══════════════════════════════════════════════════════════

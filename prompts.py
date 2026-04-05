@@ -77,6 +77,7 @@ You can help the user book, cancel, or reschedule appointments using these tools
 === BOOKING — CRITICAL RULES ===
 1. NO INVENTED SLOTS: Only suggest times a tool returned as FREE.
 2. If slot is 'BUSY', call suggest_next_available_slot and present those options.
+3. If check_calendar_availability returns an out-of-hours error ("We only accept appointments during these business hours..."), do NOT call suggest_next_available_slot immediately. First explain that the requested time is outside business hours and ask the user to choose a time within those periods.
 3. GARBLED INPUT: If unclear, ask "{unclear_msg}" — do not call any tools.
 
 === CANCEL / RESCHEDULE ===
@@ -192,7 +193,8 @@ def get_system_prompt(
     config dict (from bot_configs table) can include:
       bot_name, receptionist_name, business_description,
       extra_prompt_context,
-      business_hours_start, business_hours_end, slot_duration_mins, language_code
+      business_hours_start, business_hours_end, business_hours_periods,
+      slot_duration_mins, language_code
 
     enabled_modules: list of module names (e.g. ["BOOKING_MODULE", "FACTS_MODULE"])
       If None, defaults to ["BOOKING_MODULE"] for backward compatibility.
@@ -206,6 +208,18 @@ def get_system_prompt(
     biz_description   = cfg.get("business_description") or "a professional appointment booking service"
     extra_context     = cfg.get("extra_prompt_context") or ""
     lang_code         = cfg.get("language_code", "gu-IN")
+    slot_mins         = cfg.get("slot_duration_mins", 30)
+
+    periods = cfg.get("business_hours_periods") or []
+    if isinstance(periods, list) and periods:
+        hours_text = ", ".join(
+            f"{p.get('start', '09:00')} to {p.get('end', '18:00')}"
+            for p in periods if isinstance(p, dict)
+        )
+    else:
+        bh_start = cfg.get("business_hours_start", 9)
+        bh_end = cfg.get("business_hours_end", 18)
+        hours_text = f"{bh_start}:00 to {bh_end}:00"
 
     lang_pack = LANG_PACK.get(lang_code, LANG_PACK["gu-IN"])
     unclear_msg             = lang_pack["unclear_msg"]
@@ -254,6 +268,7 @@ Never fill missing gaps with assumptions. This is a HARD RULE.
     base = f"""You are {receptionist_name}, the AI receptionist at {bot_name} — {biz_description}.
     Remember you are a Female AI receptionist.
 Today: {today_date} ({day}). All times in IST.
+Business hours: {hours_text}. Default slot: {slot_mins} minutes.
 {extra_line}
 
 === LANGUAGE PREFERENCE — OPENING (VERY IMPORTANT) ===
@@ -262,6 +277,7 @@ Ask naturally in the admin-configured language first, then offer the options.
 Example: {lang_pref_example}
 After the user responds with their language preference, immediately switch to that language for all further responses.
 Only ask this ONCE per conversation — after the user answers, do not ask again.
+If MEMORY STATE has language_preference already set, NEVER ask this question again.
 
 === OUTPUT FORMAT ===
 - Default reply language: {lang_instruction}.
@@ -390,6 +406,7 @@ Return ONLY updated JSON (no explanation)
 MEMORY SCHEMA:
 {{
   "intent": {intent_str},
+  "language_preference": "gu-IN | hi-IN | en-IN | null",
   "appointment": {{
     "date": "YYYY-MM-DD or null",
     "time": "HH:MM or null",
@@ -423,6 +440,11 @@ User: "{time_example}"
 {facts_intent_line}
 - If detected intent is for a disabled module → set intent to "none"
 {facts_detection_block}
+
+### 2B. LANGUAGE PREFERENCE MEMORY (VERY IMPORTANT)
+- If user says they want English/Hindi/Gujarati (e.g., "continue in english", "speak hindi", "gujarati please"), set language_preference accordingly.
+- If user does not mention language in this turn, KEEP previous language_preference unchanged.
+- Never reset language_preference to null unless user explicitly asks to reset language choice.
 
 ### 3. INTENT CONTINUITY (VERY IMPORTANT)
 - DO NOT reset intent to "none" if conversation is ongoing

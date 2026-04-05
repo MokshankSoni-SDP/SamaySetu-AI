@@ -102,6 +102,7 @@ class BotConfigRequest(BaseModel):
     tts_speaker: Optional[str] = None
     business_hours_start: Optional[int] = None
     business_hours_end: Optional[int] = None
+    business_hours_periods: Optional[List[dict]] = None
     slot_duration_mins: Optional[int] = None
     silence_timeout_ms: Optional[int] = None
     greeting_message: Optional[str] = None
@@ -371,7 +372,7 @@ async def public_bot_config(tenant_id: Optional[str] = None):
             return {}
         return {k: cfg[k] for k in (
             "bot_name", "receptionist_name", "language_code", "tts_speaker",
-            "business_hours_start", "business_hours_end", "slot_duration_mins",
+            "business_hours_start", "business_hours_end", "business_hours_periods", "slot_duration_mins",
             "silence_timeout_ms", "greeting_message", "business_description",
         ) if k in cfg}
     except Exception:
@@ -566,8 +567,15 @@ async def admin_preview_chat(req: PreviewChatRequest, session=Depends(_check_adm
     bot_name    = bot_cfg.get("bot_name") or "SamaySetu AI"
     biz_desc    = bot_cfg.get("business_description") or "a professional appointment booking service"
     extra_ctx   = bot_cfg.get("extra_prompt_context") or ""
-    biz_start   = bot_cfg.get("business_hours_start", 9)
-    biz_end     = bot_cfg.get("business_hours_end", 18)
+    biz_periods = bot_cfg.get("business_hours_periods") or []
+    if biz_periods:
+        biz_hours_text = ", ".join(
+            f"{p.get('start', '09:00')} to {p.get('end', '18:00')}" for p in biz_periods
+        )
+    else:
+        biz_start = bot_cfg.get("business_hours_start", 9)
+        biz_end = bot_cfg.get("business_hours_end", 18)
+        biz_hours_text = f"{biz_start}:00 to {biz_end}:00"
     slot_dur    = bot_cfg.get("slot_duration_mins", 30)
 
     lang_map = {
@@ -580,7 +588,7 @@ async def admin_preview_chat(req: PreviewChatRequest, session=Depends(_check_adm
 
     system_prompt = f"""You are {receptionist}, the AI receptionist at {bot_name} — {biz_desc}.
 Today: {today} ({day}). All times in IST.
-Business hours: {biz_start}:00 to {biz_end}:00. Default slot: {slot_dur} minutes.{extra_line}
+Business hours: {biz_hours_text}. Default slot: {slot_dur} minutes.{extra_line}
 
 This is a PREVIEW/TEST session by the business admin to see how you respond.
 Reply in {lang_instr}.
@@ -963,6 +971,15 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         "phone_number":          phone_number,
         "tenant_id":             None,
         "bot_config":            {},
+        "memory": {
+            "intent": None,
+            "language_preference": None,
+            "pending_action": "waiting_for_confirmation",
+            "appointment": {"date": None, "time": None, "duration": None},
+            "reschedule": {"old_time": None, "new_time": None},
+            "date_context": {"resolved_date": None, "source": "none"},
+        },
+        "language_prompt_asked": False,
         "language_switch_event": language_switch_event,   # brain signals this directly
     }
 

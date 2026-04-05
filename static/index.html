@@ -1037,7 +1037,21 @@
             if (cfg.greeting_message) {
                 document.getElementById('greetingTitle').textContent = cfg.greeting_message;
             }
-            if (cfg.business_hours_start !== undefined) {
+            const fmtHm = (hhmm) => {
+                const [hRaw, mRaw] = String(hhmm).split(':').map(Number);
+                const h = Number.isFinite(hRaw) ? hRaw : 9;
+                const m = Number.isFinite(mRaw) ? mRaw : 0;
+                const ap = h >= 12 ? 'PM' : 'AM';
+                const hr = h % 12 || 12;
+                return `${hr}:${String(m).padStart(2, '0')} ${ap}`;
+            };
+            if (Array.isArray(cfg.business_hours_periods) && cfg.business_hours_periods.length) {
+                const txt = cfg.business_hours_periods
+                    .filter(p => p && p.start && p.end)
+                    .map(p => `${fmtHm(p.start)} – ${fmtHm(p.end)}`)
+                    .join(' | ');
+                if (txt) document.getElementById('bizHoursDisplay').textContent = txt;
+            } else if (cfg.business_hours_start !== undefined) {
                 const s = cfg.business_hours_start, e = cfg.business_hours_end;
                 const fmt = h => `${h > 12 ? h - 12 : h}:00 ${h >= 12 ? 'PM' : 'AM'}`;
                 document.getElementById('bizHoursDisplay').textContent = `${fmt(s)} – ${fmt(e)}`;

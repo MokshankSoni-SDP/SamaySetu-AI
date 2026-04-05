@@ -122,6 +122,16 @@ def create_tables():
         );
         """,
 
+        # ── Schema migrations ─────────────────────────────────────────────────
+        "ALTER TABLE bot_configs ADD COLUMN IF NOT EXISTS business_hours_periods TEXT;",
+        """
+        UPDATE bot_configs
+        SET business_hours_periods = json_build_array(
+            json_build_object('start', business_hours_start, 'end', business_hours_end)
+        )::text
+        WHERE business_hours_periods IS NULL OR business_hours_periods = '';
+        """,
+
         # ── Indexes ────────────────────────────────────────────────────────────
         "CREATE INDEX IF NOT EXISTS idx_appt_tenant_phone   ON appointments (tenant_id, phone_number, start_time DESC);",
         "CREATE INDEX IF NOT EXISTS idx_appt_tenant_date    ON appointments (tenant_id, start_time);",
