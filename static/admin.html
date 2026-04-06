@@ -9,6 +9,9 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap"
+    rel="stylesheet" />
   <style>
     :root {
       --bg: #0a0c10;
@@ -28,6 +31,16 @@
       --font-display: 'Cinzel', serif;
       --font-body: 'Inter', sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --panel: #f1f3f5;
+      --border: #e9ecef;
+      --text: #212529;
+      --muted: #868e96;
+      --glow: rgba(245, 166, 35, .15);
     }
 
     *,
@@ -2170,6 +2183,120 @@
 
     .live-chat-send-btn:hover { opacity: .85; }
     .live-chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
+    /* Premium SaaS Theme Layer */
+    :root {
+      --bg: #f5f7ff;
+      --surface: rgba(255, 255, 255, .86);
+      --panel: #ffffff;
+      --border: rgba(79, 70, 229, .14);
+      --accent: #4f46e5;
+      --accent2: #7c3aed;
+      --text: #1d2452;
+      --muted: #6b7280;
+      --glow: rgba(79, 70, 229, .22);
+      --font-display: 'Syne', sans-serif;
+      --font-body: 'DM Sans', sans-serif;
+    }
+
+    body {
+      background: radial-gradient(circle at 8% 8%, rgba(79, 70, 229, .08), transparent 24%),
+        radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 28%),
+        var(--bg);
+    }
+
+    .layout {
+      margin: 14px;
+      min-height: calc(100vh - 28px);
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 62px rgba(79, 70, 229, .13);
+      background: rgba(255, 255, 255, .72);
+      backdrop-filter: blur(12px);
+    }
+
+    .sidebar-nav,
+    .top-bar,
+    .section-card,
+    .stat-card,
+    .card,
+    .login-card,
+    .admin-badge,
+    .calendar-status,
+    .step-card,
+    .microstep {
+      background: #fff;
+      border-color: var(--border);
+    }
+
+    .brand-name,
+    .top-bar-title {
+      font-family: var(--font-display);
+      letter-spacing: -.02em;
+      font-weight: 700;
+    }
+
+    .btn-primary,
+    .step-link-btn {
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      box-shadow: 0 12px 28px rgba(79, 70, 229, .22);
+    }
+
+    .btn-primary:hover,
+    .step-link-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost,
+    .btn-danger,
+    .copy-btn,
+    .step-done-btn {
+      background: #fff;
+      border-color: var(--border);
+    }
+
+    .nav-item.active {
+      background: rgba(79, 70, 229, .08);
+      border-left-color: var(--accent);
+    }
+
+    .section-card,
+    .stat-card,
+    .card {
+      box-shadow: 0 10px 28px rgba(79, 70, 229, .08);
+    }
+
+    #adminLogin {
+      background: rgba(37, 45, 93, .24);
+      backdrop-filter: blur(10px);
+    }
+
+    .login-logo-mark,
+    .brand-mark {
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+    }
+
+    .login-btn {
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      box-shadow: 0 18px 34px rgba(79, 70, 229, .24);
+    }
+
+    .toast {
+      background: #fff;
+      border-color: var(--border);
+      box-shadow: 0 10px 28px rgba(79, 70, 229, .12);
+    }
+
+    @media (max-width: 1100px) {
+      .layout {
+        margin: 8px;
+        min-height: calc(100vh - 16px);
+      }
+    }
   </style>
 </head>
 
@@ -2230,6 +2357,10 @@
           <span id="unsavedIndicator" style="display:none;"><span class="unsaved-dot"></span></span>
         </div>
         <div class="top-bar-right">
+          <!-- Theme Toggle -->
+          <button id="themeToggleBtn" class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="Toggle Light/Dark Theme" style="padding: 6px 10px; font-size: 14px; border-radius: 8px;">
+            <span id="themeIcon">☀️</span>
+          </button>
           <div class="admin-badge">
             <span>👤</span>
             <span class="admin-email" id="adminEmailDisplay">—</span>
@@ -4639,6 +4770,26 @@ ${cfg.extra_prompt_context ? 'Additional context: ' + cfg.extra_prompt_context :
         const inp = document.getElementById('liveChatInput');
         if (inp) { inp.value = ''; inp.focus(); }
       }
+
+      function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('admin-theme', newTheme);
+        const themeIcon = document.getElementById('themeIcon');
+        if (themeIcon) {
+          themeIcon.textContent = newTheme === 'dark' ? '☀️' : '🌙';
+        }
+      }
+
+      (function() {
+        const savedTheme = localStorage.getItem('admin-theme') || 'dark';
+        if (savedTheme === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+          const themeIcon = document.getElementById('themeIcon');
+          if (themeIcon) themeIcon.textContent = '🌙';
+        }
+      })();
     </script>
 </body>
 

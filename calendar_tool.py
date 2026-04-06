@@ -103,6 +103,24 @@ def is_past_time(start_time_str: str) -> bool:
     return start_dt <= now_dt
 
 
+def _ceil_dt_to_slot(dt: datetime.datetime, slot_minutes: int) -> datetime.datetime:
+    """
+    Round a datetime up to the next slot boundary.
+    Example: 14:36 with 30-min slots -> 15:00
+    """
+    slot = max(1, int(slot_minutes or config.DEFAULT_APPOINTMENT_DURATION))
+    base = dt.replace(second=0, microsecond=0)
+    mins = base.hour * 60 + base.minute
+    rounded = ((mins + slot - 1) // slot) * slot
+
+    day_offset, mins_in_day = divmod(rounded, 24 * 60)
+    hour, minute = divmod(mins_in_day, 60)
+    aligned = base.replace(hour=hour, minute=minute)
+    if day_offset:
+        aligned += datetime.timedelta(days=day_offset)
+    return aligned
+
+
 def _time_to_minutes(t: str) -> Optional[int]:
     try:
         hh, mm = t.split(":")
@@ -243,11 +261,19 @@ def suggest_next_available_slot(
     # Parse time
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     start_dt = IST.localize(naive_dt)
-    end_search = start_dt + datetime.timedelta(hours=search_hours)
+    now_dt = datetime.datetime.now(IST)
+
+    # Hard safety: never suggest slots in the past.
+    # If LLM passes a past start, clamp to next valid slot from "now".
+    search_start = start_dt
+    if search_start < now_dt:
+        search_start = _ceil_dt_to_slot(now_dt, duration_minutes)
+
+    end_search = search_start + datetime.timedelta(hours=search_hours)
 
     # 🔥 SINGLE API CALL
     body = {
-        "timeMin": start_dt.isoformat(),
+        "timeMin": search_start.isoformat(),
         "timeMax": end_search.isoformat(),
         "items": [{"id": calendar_id}],
     }
@@ -267,7 +293,7 @@ def suggest_next_available_slot(
 
     # 🧠 FIND FREE SLOTS LOCALLY
     available_slots = []
-    current = start_dt
+    current = search_start
 
     while current < end_search and len(available_slots) < max_slots:
         end_time = current + datetime.timedelta(minutes=duration_minutes)

@@ -79,6 +79,7 @@ You can help the user book, cancel, or reschedule appointments using these tools
 2. If slot is 'BUSY', call suggest_next_available_slot and present those options.
 3. If check_calendar_availability returns an out-of-hours error ("We only accept appointments during these business hours..."), do NOT call suggest_next_available_slot immediately. First explain that the requested time is outside business hours and ask the user to choose a time within those periods.
 3. GARBLED INPUT: If unclear, ask "{unclear_msg}" — do not call any tools.
+4. NEVER SUGGEST PAST TIMES: If the appointment date is today, you must not call any booking tool with a time earlier than CURRENT_IST_TIME.
 
 === CANCEL / RESCHEDULE ===
 - If time not specified for cancellation or reschedule never assume — ask the user.
@@ -186,6 +187,7 @@ def get_system_prompt(
     day: str,
     config: dict = None,
     enabled_modules: list = None,
+    current_time_ist: str = None,
 ) -> str:
     """
     Generates the system prompt for any tenant's bot.
@@ -234,6 +236,11 @@ def get_system_prompt(
     }
     lang_instruction = lang_map.get(lang_code, "polite, natural Gujarati")
     extra_line = f"\nAdditional context: {extra_context}" if extra_context else ""
+    current_time_line = (
+        f"\nCURRENT_IST_TIME: {current_time_ist}"
+        if current_time_ist
+        else ""
+    )
 
     # Language preference opening — keyed by admin-configured language
     _lang_pref_examples = {
@@ -268,6 +275,7 @@ Never fill missing gaps with assumptions. This is a HARD RULE.
     base = f"""You are {receptionist_name}, the AI receptionist at {bot_name} — {biz_description}.
     Remember you are a Female AI receptionist.
 Today: {today_date} ({day}). All times in IST.
+{current_time_line}
 Business hours: {hours_text}. Default slot: {slot_mins} minutes.
 {extra_line}
 
@@ -292,6 +300,7 @@ If MEMORY STATE has language_preference already set, NEVER ask this question aga
 - "{today_word}" / "today" = {today_date}. "{tomorrow_word}" / "tomorrow" = next day. "{day_after_tomorrow_word}" = day after.
 - Day names = next upcoming occurrence. "13 તારીખ" = current month's 13th (next month if passed).
 - Timings: "1:30", "2 વાગ્યે" implies PM; "9 વાગ્યે" implies AM unless specified.
+- If date is today, never suggest or call tools for any time earlier than CURRENT_IST_TIME.
 
 === MEMORY USAGE RULES (VERY IMPORTANT) ===
 You are given a MEMORY STATE which contains structured information extracted from previous conversation.

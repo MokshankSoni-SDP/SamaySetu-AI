@@ -9,6 +9,9 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Sans+Gujarati:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap"
+        rel="stylesheet" />
     <style>
         :root {
             --bg: #0a0c10;
@@ -827,6 +830,320 @@
             font-size: 13px;
             color: var(--muted);
         }
+        /* Modern SaaS Theme Layer */
+        :root {
+            --bg: #f6f8ff;
+            --surface: rgba(255, 255, 255, .86);
+            --panel: #ffffff;
+            --border: rgba(79, 70, 229, .16);
+            --accent: #4f46e5;
+            --accent2: #7c3aed;
+            --text: #1b2152;
+            --muted: #6b7280;
+            --glow: rgba(79, 70, 229, .22);
+            --font-display: 'Syne', sans-serif;
+            --font-body: 'DM Sans', 'Noto Sans Gujarati', sans-serif;
+        }
+
+        body {
+            background: radial-gradient(circle at 12% 12%, rgba(79, 70, 229, .09), transparent 30%),
+                radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 32%),
+                var(--bg);
+        }
+
+        .lp-nav {
+            position: sticky;
+            top: 0;
+            z-index: 14;
+            background: rgba(246, 248, 255, .85);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 22px;
+            margin: 0 22px;
+            border-radius: 0 0 16px 16px;
+        }
+
+        .lp-nav.scrolled {
+            box-shadow: 0 12px 34px rgba(79, 70, 229, .14);
+        }
+
+        .lp-brand {
+            font-family: var(--font-display);
+            font-weight: 800;
+            color: var(--accent);
+            font-size: 24px;
+            letter-spacing: -.03em;
+        }
+
+        .lp-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .lp-btn {
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 9px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            font-family: var(--font-body);
+            cursor: pointer;
+            background: #fff;
+            color: var(--accent);
+        }
+
+        .lp-btn.primary {
+            color: #fff;
+            border: none;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 12px 30px rgba(79, 70, 229, .25);
+        }
+
+        .landing {
+            margin: 22px;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            background: rgba(255, 255, 255, .72);
+            box-shadow: 0 24px 58px rgba(79, 70, 229, .12);
+        }
+
+        .lp-section {
+            padding: 54px clamp(18px, 5vw, 60px);
+            border-bottom: 1px solid rgba(79, 70, 229, .08);
+        }
+
+        .lp-hero {
+            display: grid;
+            grid-template-columns: 1.1fr .9fr;
+            gap: 26px;
+            align-items: center;
+        }
+
+        .lp-hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(34px, 5vw, 54px);
+            line-height: 1.08;
+            letter-spacing: -.04em;
+            margin-bottom: 12px;
+        }
+
+        .lp-hero h1 span {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .lp-sub {
+            color: var(--muted);
+            font-size: 18px;
+            line-height: 1.7;
+            max-width: 620px;
+        }
+
+        .lp-grid-2,
+        .lp-grid-3,
+        .lp-grid-4 {
+            display: grid;
+            gap: 12px;
+        }
+
+        .lp-grid-2 {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .lp-grid-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .lp-grid-4 {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .lp-card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 10px 28px rgba(79, 70, 229, .08);
+            transition: transform .2s;
+        }
+
+        .lp-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .lp-tag {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 9px;
+        }
+
+        .lp-title {
+            font-family: var(--font-display);
+            font-size: clamp(26px, 3.8vw, 40px);
+            line-height: 1.15;
+            letter-spacing: -.03em;
+            margin-bottom: 8px;
+        }
+
+        .lp-mock {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 14px;
+            box-shadow: 0 18px 44px rgba(79, 70, 229, .12);
+        }
+
+        .lp-mock-row {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .lp-chip {
+            background: rgba(79, 70, 229, .08);
+            border: 1px solid rgba(79, 70, 229, .16);
+            border-radius: 10px;
+            padding: 8px;
+            text-align: center;
+            font-size: 11px;
+        }
+
+        .lp-chip b {
+            display: block;
+            font-size: 17px;
+            color: var(--accent);
+        }
+
+        .lp-footer {
+            border: none;
+            text-align: center;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed, #06b6d4);
+            color: #fff;
+        }
+
+        .lp-footer .lp-sub {
+            color: rgba(255, 255, 255, .88);
+            margin: 0 auto;
+        }
+
+        body::before {
+            opacity: .015;
+        }
+
+        .app {
+            margin: 22px;
+            min-height: calc(100vh - 44px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 26px 60px rgba(79, 70, 229, .12);
+            background: rgba(255, 255, 255, .75);
+            backdrop-filter: blur(12px);
+        }
+
+        header {
+            background: rgba(255, 255, 255, .88);
+        }
+
+        .logo-text h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -.03em;
+        }
+
+        .sidebar {
+            background: rgba(255, 255, 255, .76);
+        }
+
+        .user-card,
+        .appt-item,
+        .quick-action-btn,
+        .transcript-box,
+        .chat-feed,
+        #waveCanvas,
+        .toast,
+        .login-card {
+            background: #fff;
+            border-color: var(--border);
+        }
+
+        .bot-greeting h2 {
+            font-family: var(--font-display);
+            font-size: 30px;
+            letter-spacing: -.03em;
+        }
+
+        .bot-greeting p {
+            font-size: 16px;
+        }
+
+        .quick-action-btn:hover {
+            transform: translateY(-2px);
+            border-color: rgba(79, 70, 229, .35);
+            color: var(--accent);
+            box-shadow: 0 12px 28px rgba(79, 70, 229, .12);
+        }
+
+        .mic-btn {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+        }
+
+        .msg.user {
+            background: rgba(79, 70, 229, .1);
+            border-color: rgba(79, 70, 229, .25);
+        }
+
+        .msg.ai {
+            background: #fff;
+        }
+
+        footer {
+            background: rgba(255, 255, 255, .88);
+        }
+
+        #loginOverlay {
+            background: rgba(36, 46, 94, .2);
+        }
+
+        .login-btn {
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 16px 36px rgba(79, 70, 229, .24);
+        }
+
+        .login-field input {
+            background: rgba(79, 70, 229, .05);
+        }
+
+        @media (max-width: 1100px) {
+            .lp-nav,
+            .landing {
+                margin: 12px;
+            }
+
+            .lp-hero,
+            .lp-grid-4,
+            .lp-grid-3,
+            .lp-grid-2 {
+                grid-template-columns: 1fr;
+            }
+
+            .app {
+                margin: 12px;
+                min-height: calc(100vh - 24px);
+            }
+        }
     </style>
 </head>
 
@@ -836,7 +1153,7 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- LOGIN OVERLAY -->
-    <div id="loginOverlay">
+    <div id="loginOverlay" class="hidden">
         <div class="login-card">
             <div class="login-logo">
                 <div class="login-logo-mark" id="loginLogoMark">સ</div>
@@ -861,767 +1178,148 @@
         </div>
     </div>
 
-    <div class="app">
-        <header>
-            <div class="logo">
-                <div class="logo-mark" id="hdrLogoMark">સ</div>
-                <div class="logo-text">
-                    <h1 id="hdrBotName">SamaySetu AI</h1>
-                    <span id="hdrBizDesc">Gujarati Voice Booking Assistant</span>
-                </div>
-            </div>
-            <div class="header-right">
-                <div class="user-badge" id="userBadge" style="display:none">
-                    <span>📞</span>
-                    <span class="user-phone-hdr" id="userPhoneLabel"></span>
-                </div>
-                <button class="logout-btn" id="logoutBtn" style="display:none"
-                    onclick="doLogout()">✕&nbsp;Logout</button>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
-                    <div class="status-dot" id="connDot"></div>
-                    <span id="connLabel">Disconnected</span>
-                </div>
-            </div>
-        </header>
+    <nav class="lp-nav">
+        <div class="lp-brand">SamaySetu</div>
+        <div class="lp-actions">
+            <button class="lp-btn" onclick="navigateToCustomer()">Explore as Customer</button>
+            <a class="lp-btn primary" href="/admin">Start Your Shop</a>
+        </div>
+    </nav>
 
-        <!-- Left sidebar: user profile + appointments -->
-        <aside class="sidebar">
+    <main class="landing">
+        <section class="lp-section lp-hero">
             <div>
-                <div class="panel-title">My Profile</div>
-                <div class="user-card">
-                    <div class="user-avatar" id="userAvatar">👤</div>
-                    <div class="user-name" id="sideUserName">—</div>
-                    <div class="user-phone-disp" id="sideUserPhone">—</div>
+                <div class="lp-tag">Premium Booking Platform</div>
+                <h1>Digitize Your Shop. <span>Manage Bookings Effortlessly.</span></h1>
+                <p class="lp-sub">SamaySetu helps you manage appointments, customers, and daily operations in one elegant dashboard built for growth.</p>
+                <div class="lp-actions" style="margin-top:18px;">
+                    <a class="lp-btn primary" href="/admin">Start Your Shop</a>
+                    <button class="lp-btn" onclick="navigateToCustomer(); openLoginOverlay();">Explore as Customer</button>
                 </div>
             </div>
+            <div class="lp-mock">
+                <div class="lp-mock-row">
+                    <div class="lp-chip"><b>124</b>Bookings</div>
+                    <div class="lp-chip"><b>92%</b>Show Rate</div>
+                    <div class="lp-chip"><b>18</b>Today</div>
+                </div>
+                <div class="lp-card">Calendar synced, confirmations sent, and walk-ins converted automatically.</div>
+                <div class="lp-card" style="margin-top:10px;">Live queue: 11:00 Haircut • 11:30 Facial • 12:00 Follow-up.</div>
+            </div>
+        </section>
 
-            <div>
-                <div class="panel-title">My Appointments</div>
-                <div class="appt-list" id="apptList">
-                    <div style="font-size:12px;color:var(--muted);">Loading...</div>
+        <section class="lp-section">
+            <div class="lp-grid-2">
+                <div class="lp-card scroll-reveal">
+                    <div class="lp-tag">Problem</div>
+                    <h3>Still managing bookings on calls, WhatsApp, or paper?</h3>
+                    <p class="lp-sub" style="font-size:15px;">Manual flow creates missed calls, double bookings, and customer drop-offs.</p>
+                </div>
+                <div class="lp-card scroll-reveal">
+                    <div class="lp-tag">Solution</div>
+                    <h3>Automate everything with SamaySetu</h3>
+                    <p class="lp-sub" style="font-size:15px;">Appointments, reminders, and follow-ups run in one clean system with zero chaos.</p>
                 </div>
             </div>
+        </section>
 
-            <div>
-                <div class="panel-title">Quick Actions</div>
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    <button class="quick-action-btn" onclick="addMessage('user','નવી નિમણૂક બુક કરો')">
-                        📅 <span>Book New Appointment</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="addMessage('user','મારી નિમણૂક રદ કરો')">
-                        ✕ <span>Cancel Appointment</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="addMessage('user','સમય બદલો')">
-                        🔄 <span>Reschedule</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="loadAppointments()">
-                        🔃 <span>Refresh Appointments</span>
-                    </button>
+        <section class="lp-section">
+            <div class="lp-tag">Features</div>
+            <h2 class="lp-title">Simple for teams, powerful for growth</h2>
+            <div class="lp-grid-4">
+                <div class="lp-card scroll-reveal"><b>Appointment Booking</b><p class="lp-sub" style="font-size:14px;">Real-time slots with conflict-free scheduling.</p></div>
+                <div class="lp-card scroll-reveal"><b>Customer Management</b><p class="lp-sub" style="font-size:14px;">History, preferences, and repeat flow in one place.</p></div>
+                <div class="lp-card scroll-reveal"><b>Dashboard & Insights</b><p class="lp-sub" style="font-size:14px;">See daily trends and conversion metrics instantly.</p></div>
+                <div class="lp-card scroll-reveal"><b>Multi-Shop Ready</b><p class="lp-sub" style="font-size:14px;">Run multiple locations independently with ease.</p></div>
+            </div>
+        </section>
+
+        <section class="lp-section">
+            <div class="lp-grid-2">
+                <div>
+                    <div class="lp-tag">For Shop Owners</div>
+                    <h2 class="lp-title">Built for every service business</h2>
+                </div>
+                <div class="lp-grid-2">
+                    <div class="lp-card">Salons</div>
+                    <div class="lp-card">Clinics</div>
+                    <div class="lp-card">Freelancers</div>
+                    <div class="lp-card">Local Service Providers</div>
                 </div>
             </div>
+        </section>
 
-            <div>
-                <div class="panel-title">Business Hours</div>
-                <div
-                    style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px;">
-                    <div style="font-size:13px;color:var(--text);" id="bizHoursDisplay">9:00 AM – 6:00 PM</div>
-                    <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="slotDisplay">30 min slots</div>
+        <section class="lp-section">
+            <div class="lp-grid-2">
+                <div>
+                    <div class="lp-tag">For Customers</div>
+                    <h2 class="lp-title">Book services in seconds</h2>
+                    <p class="lp-sub" style="font-size:15px;">No waiting, easy booking, and instant confirmations every time.</p>
+                </div>
+                <div class="lp-card">
+                    <div class="phone-step" id="pstep1"><b>Step 1</b> Choose service</div>
+                    <div class="phone-step" id="pstep2"><b>Step 2</b> Pick time slot</div>
+                    <div class="phone-step" id="pstep3"><b>Step 3</b> Confirm booking</div>
                 </div>
             </div>
-        </aside>
+        </section>
 
-        <!-- Main stage: mic + chat -->
-        <main class="main-stage">
-            <div class="bot-greeting">
-                <h2 id="greetingTitle">નમસ્તે! 🙏</h2>
-                <p id="greetingBody">હું <span id="botNameInline">SamaySetu AI</span> છું. માઇક્રોફોન દબાવો અને
-                    ગુજરાતીમાં બોલો.</p>
+        <section class="lp-section">
+            <div class="lp-tag">How It Works</div>
+            <div class="lp-grid-3">
+                <div class="lp-card"><b>1. Create your shop</b></div>
+                <div class="lp-card"><b>2. Add services & timings</b></div>
+                <div class="lp-card"><b>3. Start receiving bookings</b></div>
             </div>
+        </section>
 
-            <div class="mic-ring-wrap" id="micRingWrap">
-                <div class="ring ring-1"></div>
-                <div class="ring ring-2"></div>
-                <div class="ring ring-3"></div>
-                <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Click to speak">
-                    <svg id="micIcon" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                            d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 015 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
-                    </svg>
-                </button>
+        <section class="lp-section">
+            <div class="lp-tag">Testimonials</div>
+            <div class="lp-grid-3">
+                <div class="lp-card">“We cut booking time by 70% in week one.”</div>
+                <div class="lp-card">“Our customers love instant confirmations.”</div>
+                <div class="lp-card">“Setup was fast and the UI feels premium.”</div>
             </div>
+        </section>
 
-            <div class="state-label" id="stateLabel">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
-            <div class="commit-bar" id="commitBar">
-                <div class="commit-bar-fill" id="commitBarFill"></div>
+        <section class="lp-section">
+            <div class="lp-tag">Why Choose Us</div>
+            <div class="lp-grid-3">
+                <div class="lp-card">Each shop stays fully independent.</div>
+                <div class="lp-card">Simple setup with minimal learning curve.</div>
+                <div class="lp-card">Scales as your business expands.</div>
             </div>
-            <div class="transcript-box empty" id="transcriptBox">તમારો અવાજ અહીં દેખાશે...</div>
-            <canvas id="waveCanvas" width="480" height="60"></canvas>
+        </section>
 
-            <div class="chat-feed">
-                <div class="chat-header">
-                    <span>Conversation</span>
-                    <button class="chat-clear-btn" onclick="clearChat()">Clear</button>
-                </div>
-                <div class="chat-body" id="chatBody">
-                    <div class="msg ai">
-                        <!-- <div id="welcomeMsg">નમસ્તે! હું SamaySetu AI છું. નિમણૂક બુક, રદ, કે સમય બદલવા માટે કહો.</div>
-                        <div class="msg-meta">AI · now</div> -->
-                    </div>
-                </div>
+        <section class="lp-section lp-footer">
+            <h2>Start Your Digital Shop Today</h2>
+            <p class="lp-sub">Convert more bookings and run your business with confidence.</p>
+            <div class="lp-actions" style="justify-content:center;margin-top:12px;">
+                <a class="lp-btn primary" href="/admin">Get Started</a>
+                <a class="lp-btn" href="/admin">Login</a>
             </div>
-        </main>
+        </section>
 
-        <footer>
-            <div id="footerCopy">© 2025 SamaySetu AI · Powered by Sarvam + Groq</div>
-            <div>
-                <button class="footer-btn danger" onclick="resetSession()">↺ Reset Session</button>
+        <section class="lp-section" style="border-bottom:none;padding-top:22px;padding-bottom:22px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px;">
+                <div>© 2026 SamaySetu</div>
+                <div><a href="#" style="margin-right:12px;color:inherit;">About</a><a href="#" style="margin-right:12px;color:inherit;">Contact</a><a href="/admin" style="margin-right:12px;color:inherit;">Login</a><a href="https://github.com" target="_blank" style="color:inherit;">GitHub</a></div>
             </div>
-        </footer>
-    </div>
+        </section>
+    </main>
 
+    
     <script>
-        // ── Config from URL/meta ──────────────────────────────────────────────────────
-        const urlParams = new URLSearchParams(window.location.search);
-        const TENANT_ID = urlParams.get('tenant') || window.TENANT_ID || null;
-
-        // ── State ─────────────────────────────────────────────────────────────────────
-        let socket, audioContext, processor;
-        let isListening = false;
-        let msgCount = 0, packetCount = 0;
-        let loggedInUserPhone = null;
-        let botConfig = {};
-        let apptRefreshInterval = null;
-        let audioQueue = [], queuePlaying = false, aiSpeaking = false;
-        let currentAudio = null, currentResponseId = 0;
-        let lastPartialTranscript = '', silenceTimer = null;
-        let commitBarAnimFrame = null, commitBarStart = null;
-
-        const settings = { lang: 'gu-IN', speaker: 'simran', sampleRate: 16000, silenceTimeout: 1500 };
-        const _SILENCE_B64 = btoa(String.fromCharCode(...new Array(3200).fill(0)));
-
-        // ── DOM refs ──────────────────────────────────────────────────────────────────
-        const micBtn = document.getElementById('micBtn');
-        const micRingWrap = document.getElementById('micRingWrap');
-        const stateLabel = document.getElementById('stateLabel');
-        const transcriptBox = document.getElementById('transcriptBox');
-        const chatBody = document.getElementById('chatBody');
-        const connDot = document.getElementById('connDot');
-        const connLabel = document.getElementById('connLabel');
-        const apptListEl = document.getElementById('apptList');
-        const commitBar = document.getElementById('commitBar');
-        const commitBarFill = document.getElementById('commitBarFill');
-
-        // ── Load bot config ───────────────────────────────────────────────────────────
-        async function loadBotConfig() {
-            if (!TENANT_ID) return;
-            try {
-                const r = await fetch(`/public/bot-config?tenant_id=${TENANT_ID}`);
-                if (!r.ok) return;
-                const cfg = await r.json();
-                applyBotConfig(cfg);
-            } catch (e) { }
-        }
-
-        function applyBotConfig(cfg) {
-            if (!cfg) return;
-            botConfig = cfg;
-            const n = cfg.bot_name || 'SamaySetu AI';
-            document.getElementById('loginBotName').textContent = n;
-            document.getElementById('hdrBotName').textContent = n;
-            document.getElementById('botNameInline').textContent = n;
-            document.getElementById('greetingBody').innerHTML = `હું <span id="botNameInline">${n}</span> છું. માઇક્રોફોન દબાવો અને ગુજરાતીમાં બોલો.`;
-            if (cfg.business_description) {
-                document.getElementById('loginBizDesc').textContent = cfg.business_description;
-                document.getElementById('hdrBizDesc').textContent = cfg.business_description;
+        function navigateToCustomer() {
+            const params = new URLSearchParams(window.location.search);
+            let tenant = params.get('tenant') || params.get('id');
+            if (!tenant) {
+                tenant = prompt("Enter Shop ID (Tenant ID) to access booking system:", "demo");
             }
-            if (cfg.greeting_message) {
-                document.getElementById('greetingTitle').textContent = cfg.greeting_message;
-            }
-            const fmtHm = (hhmm) => {
-                const [hRaw, mRaw] = String(hhmm).split(':').map(Number);
-                const h = Number.isFinite(hRaw) ? hRaw : 9;
-                const m = Number.isFinite(mRaw) ? mRaw : 0;
-                const ap = h >= 12 ? 'PM' : 'AM';
-                const hr = h % 12 || 12;
-                return `${hr}:${String(m).padStart(2, '0')} ${ap}`;
-            };
-            if (Array.isArray(cfg.business_hours_periods) && cfg.business_hours_periods.length) {
-                const txt = cfg.business_hours_periods
-                    .filter(p => p && p.start && p.end)
-                    .map(p => `${fmtHm(p.start)} – ${fmtHm(p.end)}`)
-                    .join(' | ');
-                if (txt) document.getElementById('bizHoursDisplay').textContent = txt;
-            } else if (cfg.business_hours_start !== undefined) {
-                const s = cfg.business_hours_start, e = cfg.business_hours_end;
-                const fmt = h => `${h > 12 ? h - 12 : h}:00 ${h >= 12 ? 'PM' : 'AM'}`;
-                document.getElementById('bizHoursDisplay').textContent = `${fmt(s)} – ${fmt(e)}`;
-            }
-            if (cfg.slot_duration_mins) {
-                document.getElementById('slotDisplay').textContent = `${cfg.slot_duration_mins} min slots`;
-            }
-            if (cfg.language_code) settings.lang = cfg.language_code;
-            if (cfg.tts_speaker) settings.speaker = cfg.tts_speaker;
-            if (cfg.silence_timeout_ms) settings.silenceTimeout = cfg.silence_timeout_ms;
-            if (cfg.welcome_message) {
-                document.getElementById('welcomeMsg').textContent = cfg.welcome_message;
+            if (tenant) {
+                window.location.href = "/customer?tenant=" + encodeURIComponent(tenant);
             }
         }
-
-        // ── Audio helpers ─────────────────────────────────────────────────────────────
-        //
-        // TWO playback modes depending on audio_format:
-        //
-        // 1. STREAMING MODE (audio_format='mp3'):
-        //    Uses MediaSource API. Each chunk is appended to a SourceBuffer immediately.
-        //    Playback starts on the FIRST chunk (~300ms after LLM).
-        //    tts_done → endOfStream() → audio plays out → onended → onAllChunksDone.
-        //
-        // 2. FALLBACK MODE (audio_format='wav'):
-        //    Classic blob-URL Audio objects queued sequentially.
-        //
-        // KEY INVARIANT: onAllChunksDone fires EXACTLY ONCE per response.
-        //   - responseFinished flag guards against double-fire.
-        //   - Mic is NOT unmuted until audio has actually finished playing.
-        //
-
-        let mediaSource = null, sourceBuffer = null, msAudio = null;
-        let msChunkQueue = [];
-        let msAppending = false;
-        let msTtsDone = false;
-        let ttsDoneReceived = false;
-        let responseFinished = false;   // ← guard: prevents double onAllChunksDone
-
-        function b64ToBytes(b64) {
-            const bin = atob(b64);
-            const arr = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-            return arr.buffer;
-        }
-        function b64ToBlob(b64, mime) {
-            return new Blob([b64ToBytes(b64)], { type: mime });
-        }
-
-        // ── MediaSource streaming player ──────────────────────────────────────
-        function msInit(responseId) {
-            msDestroy();
-            msTtsDone = false;
-            msChunkQueue = [];
-            msAppending = false;
-            responseFinished = false;
-
-            if (!window.MediaSource) return false;
-
-            mediaSource = new MediaSource();
-            msAudio = new Audio();
-            msAudio.src = URL.createObjectURL(mediaSource);
-
-            mediaSource.addEventListener('sourceopen', () => {
-                try {
-                    sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-                    sourceBuffer.mode = 'sequence';
-                    sourceBuffer.addEventListener('updateend', () => {
-                        msAppending = false;
-                        msDrainQueue(responseId);
-                    });
-                    msDrainQueue(responseId);
-                } catch (e) {
-                    console.error('[MS] addSourceBuffer failed:', e);
-                    msDestroy();
-                }
-            });
-
-            msAudio.onplay = () => {
-                // Confirm AI is speaking — mic should already be muted from ai_speaking_start
-                if (!aiSpeaking) { aiSpeaking = true; cancelSilenceTimer(); setMicMuteUI(true); }
-            };
-            // onended fires when the audio element reaches end of buffered data
-            msAudio.onended = () => {
-                console.debug('[MS] audio ended | resp=' + responseId);
-                msDestroy();
-                onAllChunksDone(responseId);   // guarded inside — fires once
-            };
-            msAudio.onerror = (e) => {
-                console.error('[MS] audio error', e);
-                msDestroy();
-                onAllChunksDone(responseId);
-            };
-
-            msAudio.play().catch(err => console.warn('[MS] autoplay blocked:', err));
-            return true;
-        }
-
-        function msAppendChunk(b64, responseId) {
-            msChunkQueue.push(b64ToBytes(b64));
-            msDrainQueue(responseId);
-        }
-
-        function msDrainQueue(responseId) {
-            if (msAppending || !sourceBuffer || sourceBuffer.updating) return;
-            if (msChunkQueue.length > 0) {
-                msAppending = true;
-                sourceBuffer.appendBuffer(msChunkQueue.shift());
-                if (msAudio && msAudio.paused && msAudio.readyState >= 2) {
-                    msAudio.play().catch(() => { });
-                }
-            } else if (msTtsDone) {
-                // Queue empty + server signalled done → close the stream
-                // audio element will play out remaining buffered data then fire onended
-                msEndStream(responseId);
-            }
-        }
-
-        function msSignalDone(responseId) {
-            msTtsDone = true;
-            if (msChunkQueue.length === 0 && !msAppending && sourceBuffer) {
-                msEndStream(responseId);
-            }
-            // else updateend → msDrainQueue → msEndStream once queue drains
-        }
-
-        function msEndStream(responseId) {
-            if (!mediaSource || mediaSource.readyState !== 'open') return;
-            try {
-                mediaSource.endOfStream();
-                console.debug('[MS] endOfStream() | resp=' + responseId);
-            } catch (e) {
-                console.warn('[MS] endOfStream error:', e);
-            }
-            // NOTE: do NOT call onAllChunksDone here — wait for msAudio.onended
-            // so the mic only unmutes AFTER the audio finishes playing.
-        }
-
-        function msDestroy() {
-            if (msAudio) {
-                msAudio.onended = null;   // prevent stale callbacks
-                msAudio.onerror = null;
-                msAudio.pause();
-                if (msAudio.src) URL.revokeObjectURL(msAudio.src);
-                msAudio.src = '';
-                msAudio = null;
-            }
-            sourceBuffer = null;
-            mediaSource = null;
-            msChunkQueue = [];
-            msAppending = false;
-            msTtsDone = false;
-        }
-
-        // ── Fallback: blob-URL Audio queue (for WAV) ──────────────────────────
-        function enqueueChunk(b64, index, audioFormat) {
-            if (audioFormat === 'mp3') {
-                msAppendChunk(b64, currentResponseId);
-                return;
-            }
-            audioQueue.push({ audio: b64, mime: 'audio/wav' });
-            if (!queuePlaying) playNextChunk();
-        }
-
-        function playNextChunk() {
-            if (audioQueue.length === 0) {
-                queuePlaying = false;
-                if (ttsDoneReceived) { ttsDoneReceived = false; onAllChunksDone(currentResponseId); }
-                return;
-            }
-            queuePlaying = true;
-            const { audio, mime } = audioQueue.shift();
-            const blob = b64ToBlob(audio, mime);
-            const url = URL.createObjectURL(blob);
-            currentAudio = new Audio(url);
-            currentAudio.onplay = () => { if (!aiSpeaking) { aiSpeaking = true; cancelSilenceTimer(); setMicMuteUI(true); } };
-            currentAudio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); };
-            currentAudio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); };
-            currentAudio.play().catch(() => { URL.revokeObjectURL(url); currentAudio = null; playNextChunk(); });
-        }
-
-        function onTtsDone(responseId) {
-            console.debug('[TTS] tts_done | resp=' + responseId);
-            if (msAudio && mediaSource) {
-                // Streaming mode: close stream, let audio play out, onended fires onAllChunksDone
-                msSignalDone(responseId);
-                return;
-            }
-            // WAV fallback: if queue already drained, finalize now; else wait
-            if (!queuePlaying && audioQueue.length === 0) {
-                onAllChunksDone(currentResponseId);
-            } else {
-                ttsDoneReceived = true;
-            }
-        }
-
-        function onAllChunksDone(responseId) {
-            // ── GUARD: fire exactly once per response ──────────────────────────
-            if (responseFinished) {
-                console.debug('[AUDIO] onAllChunksDone ignored (already fired) | resp=' + responseId);
-                return;
-            }
-            if (responseId !== currentResponseId) {
-                console.debug('[AUDIO] onAllChunksDone ignored (stale resp) | resp=' + responseId);
-                return;
-            }
-            responseFinished = true;
-            // ──────────────────────────────────────────────────────────────────
-            console.debug('[AUDIO] onAllChunksDone FIRING | resp=' + responseId);
-            aiSpeaking = false;
-            lastPartialTranscript = '';
-            cancelSilenceTimer();
-            setMicMuteUI(false);
-            if (socket && socket.readyState === WebSocket.OPEN)
-                socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
-            setStatus('સાંભળી રહ્યો છું...', true);
-            transcriptBox.textContent = 'તમારો અવાજ અહીં દેખાશે...';
-            transcriptBox.classList.add('empty');
-        }
-
-        function clearAudioQueue() {
-            msDestroy();
-            if (currentAudio) {
-                currentAudio.pause();
-                if (currentAudio.src) URL.revokeObjectURL(currentAudio.src);
-                currentAudio = null;
-            }
-            audioQueue = []; queuePlaying = false; ttsDoneReceived = false;
-            responseFinished = false;
-            if (aiSpeaking) {
-                aiSpeaking = false;
-                if (socket && socket.readyState === WebSocket.OPEN)
-                    socket.send(JSON.stringify({ type: 'ai_speaking_end' }));
-            }
-        }
-
-        // ── Silence commit ────────────────────────────────────────────────────────────
-        function cancelSilenceTimer() {
-            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-            if (commitBarAnimFrame) { cancelAnimationFrame(commitBarAnimFrame); commitBarAnimFrame = null; }
-            commitBar.classList.remove('active'); commitBarFill.style.width = '0%';
-        }
-        function startSilenceTimer() {
-            cancelSilenceTimer();
-            if (!lastPartialTranscript.trim()) return;
-            commitBar.classList.add('active'); commitBarStart = performance.now();
-            const duration = settings.silenceTimeout;
-            function animBar() {
-                const elapsed = performance.now() - commitBarStart;
-                const pct = Math.min((elapsed / duration) * 100, 100);
-                commitBarFill.style.width = pct + '%';
-                if (elapsed < duration) commitBarAnimFrame = requestAnimationFrame(animBar);
-            }
-            commitBarAnimFrame = requestAnimationFrame(animBar);
-            silenceTimer = setTimeout(() => {
-                const text = lastPartialTranscript.trim();
-                lastPartialTranscript = '';
-                transcriptBox.textContent = 'અહીં તમારો અવાજ દેખાશે...';
-                transcriptBox.classList.add('empty');
-                cancelSilenceTimer();
-                if (!text) return;
-                if (aiSpeaking) {
-                    console.debug('[COMMIT] SUPPRESSED (AI speaking) from silence timer:', text);
-                    return;
-                }
-                console.debug('[COMMIT] silence_timeout | ' + text);
-                addMessage('user', text);
-                msgCount++;
-                if (socket && socket.readyState === WebSocket.OPEN)
-                    socket.send(JSON.stringify({ type: 'commit_transcript', text }));
-            }, duration);
-        }
-
-        // ── UI helpers ────────────────────────────────────────────────────────────────
-        function setStatus(text, active) {
-            stateLabel.textContent = text;
-            stateLabel.className = 'state-label' + (active ? ' active' : '');
-        }
-        function setMicMuteUI(muted) {
-            micRingWrap.style.opacity = muted ? '0.3' : '1';
-            micBtn.style.cursor = muted ? 'not-allowed' : 'pointer';
-            setStatus(muted ? 'AI બોલી રહ્યો છે...' : 'સાંભળી રહ્યો છું...', true);
-        }
-        function setConnected(ok) {
-            connDot.className = 'status-dot' + (ok ? ' live' : '');
-            connLabel.textContent = ok ? 'Connected' : 'Disconnected';
-        }
-        function showToast(msg, type = '') {
-            const t = document.createElement('div');
-            t.className = 'toast' + (type ? ' ' + type : '');
-            t.textContent = msg;
-            document.getElementById('toastContainer').appendChild(t);
-            setTimeout(() => t.remove(), 4000);
-        }
-        function addMessage(role, text) {
-            const d = document.createElement('div');
-            d.className = 'msg ' + role;
-            const now = new Date().toTimeString().slice(0, 8);
-            d.innerHTML = `<div>${text}</div><div class="msg-meta">${role === 'ai' ? 'AI' : 'You'} · ${now}</div>`;
-            chatBody.appendChild(d);
-            chatBody.scrollTop = chatBody.scrollHeight;
-        }
-        function clearChat() {
-            chatBody.innerHTML = '<div class="msg ai"><div>નવો સત્ર. હું ફરી મદદ કરવા તૈયાર છું!</div><div class="msg-meta">AI · now</div></div>';
-        }
-
-        // ── Waveform ──────────────────────────────────────────────────────────────────
-        let analyser, waveAnimFrame;
-        function startWaveform() {
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
-            const canvas = document.getElementById('waveCanvas');
-            const ctx = canvas.getContext('2d');
-            function draw() {
-                waveAnimFrame = requestAnimationFrame(draw);
-                const data = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteTimeDomainData(data);
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.beginPath();
-                ctx.strokeStyle = isListening ? '#f5a623' : '#1e2538';
-                ctx.lineWidth = 2;
-                const sliceWidth = canvas.width / data.length;
-                let x = 0;
-                for (let i = 0; i < data.length; i++) {
-                    const y = (data[i] / 128.0) * (canvas.height / 2);
-                    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-                    x += sliceWidth;
-                }
-                ctx.lineTo(canvas.width, canvas.height / 2);
-                ctx.stroke();
-            }
-            draw();
-            return analyser;
-        }
-        function drawIdleWave() {
-            const canvas = document.getElementById('waveCanvas');
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.beginPath(); ctx.strokeStyle = '#1e2538'; ctx.lineWidth = 2;
-            ctx.moveTo(0, canvas.height / 2); ctx.lineTo(canvas.width, canvas.height / 2);
-            ctx.stroke();
-        }
-
-        // ── Mic toggle ────────────────────────────────────────────────────────────────
-        async function toggleMic() {
-            if (aiSpeaking) return;
-            if (isListening) { stopMic(); return; }
-            await startMic();
-        }
-        function stopMic() {
-            isListening = false;
-            micBtn.classList.remove('listening');
-            micRingWrap.classList.remove('is-listening');
-            setStatus('Stopped', false);
-            if (socket && socket.readyState === WebSocket.OPEN) socket.close();
-            clearAudioQueue();
-            if (waveAnimFrame) cancelAnimationFrame(waveAnimFrame);
-            if (audioContext) { audioContext.close(); audioContext = null; }
-            setConnected(false);
-        }
-        async function startMic() {
-            isListening = true;
-            micBtn.classList.add('listening');
-            micRingWrap.classList.add('is-listening');
-            setStatus('Connecting...', true);
-
-            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            socket = new WebSocket(`${proto}://${location.host}/ws/voice`);
-            socket.binaryType = 'arraybuffer';
-
-            socket.onopen = () => {
-                setConnected(true);
-                setStatus('Connected — preparing mic...', true);
-                socket.send(JSON.stringify({
-                    type: 'init',
-                    session_id: 'sess_' + Date.now(),
-                    phone_number: loggedInUserPhone,
-                    tenant_id: TENANT_ID,
-                }));
-                initAudio();
-            };
-
-            socket.onmessage = (evt) => {
-                const data = JSON.parse(evt.data);
-                if (data.type === 'transcript') {
-                    transcriptBox.textContent = data.text; transcriptBox.classList.remove('empty');
-                    console.debug('[TRANSCRIPT] is_final=' + data.is_final + ' | ' + data.text);
-                    if (data.is_final) {
-                        lastPartialTranscript = '';
-                        cancelSilenceTimer();
-                        // Final from Sarvam — commit directly to backend (ai_speaking guard inside)
-                        if (!aiSpeaking) {
-                            console.debug('[COMMIT] sarvam_final | ' + data.text);
-                            addMessage('user', data.text); msgCount++;
-                            if (socket && socket.readyState === WebSocket.OPEN)
-                                socket.send(JSON.stringify({ type: 'commit_transcript', text: data.text }));
-                        } else {
-                            console.debug('[COMMIT] SUPPRESSED final (AI speaking):', data.text);
-                        }
-                    } else {
-                        lastPartialTranscript = data.text;
-                        startSilenceTimer();
-                    }
-                }
-                if (data.type === 'ai_text') addMessage('ai', data.text);
-                if (data.type === 'processing_start') setStatus('Processing...', true);
-                if (data.type === 'ai_speaking_start') {
-                    currentResponseId++;
-                    // Tear down any previous audio state cleanly
-                    clearAudioQueue();   // resets responseFinished, msDestroy, etc.
-                    aiSpeaking = true;
-                    lastPartialTranscript = ''; cancelSilenceTimer(); setMicMuteUI(true);
-                    // Pre-init MediaSource so it's ready when first chunk arrives
-                    msInit(currentResponseId);
-                }
-                // audio_chunk: mp3 → MediaSource streaming, wav → legacy blob queue
-                if (data.type === 'audio_chunk') enqueueChunk(data.audio, data.index, data.audio_format || 'wav');
-                // tts_done: no more chunks — signal end of stream
-                if (data.type === 'tts_done') {
-                    console.debug('[TTS] tts_done | resp=' + (data.response_id || '?') + ' chunks=' + (data.total_chunks || '?'));
-                    onTtsDone(data.response_id || currentResponseId);
-                }
-                if (data.type === 'stt_ready' && data.reconnect_num > 0) showToast('STT reconnected ✓', 'success');
-                if (data.type === 'stt_failed') { setStatus('STT failed — refresh page', false); showToast('Voice recognition failed.', 'error'); }
-                if (data.type === 'tool_call' && data.status === 'ok') {
-                    if (data.name === 'book_appointment' && data.result && data.result.includes('SUCCESS')) {
-                        setTimeout(loadAppointments, 2000);
-                    }
-                }
-            };
-
-            socket.onclose = () => { setConnected(false); if (isListening) setStatus('Disconnected', false); };
-            socket.onerror = () => showToast('Connection error', 'error');
-        }
-
-        async function initAudio() {
-            setStatus('Requesting microphone...', true);
-            let stream;
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: { sampleRate: settings.sampleRate, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-                });
-            } catch (e) { showToast('Microphone access denied', 'error'); stopMic(); return; }
-
-            audioContext = new AudioContext({ sampleRate: settings.sampleRate });
-            const source = audioContext.createMediaStreamSource(stream);
-            const wave = startWaveform();
-            processor = audioContext.createScriptProcessor(4096, 1, 1);
-            source.connect(wave); wave.connect(processor); processor.connect(audioContext.destination);
-
-            processor.onaudioprocess = (e) => {
-                if (aiSpeaking || !socket || socket.readyState !== WebSocket.OPEN) return;
-                const inputData = e.inputBuffer.getChannelData(0);
-                const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                socket.send(pcmData.buffer);
-                packetCount++;
-            };
-            setStatus('સાંભળી રહ્યો છું...', true);
-        }
-
-        // ── Appointments ──────────────────────────────────────────────────────────────
-        async function loadAppointments() {
-            if (!loggedInUserPhone) return;
-            try {
-                const url = `/appointments/${loggedInUserPhone}` + (TENANT_ID ? `?tenant_id=${TENANT_ID}` : '');
-                const r = await fetch(url);
-                const appts = await r.json();
-                renderAppointments(appts);
-            } catch (e) { }
-        }
-        function renderAppointments(appts) {
-            if (!appts || appts.length === 0) {
-                apptListEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">No appointments yet.</div>';
-                return;
-            }
-            apptListEl.innerHTML = appts.slice(0, 5).map(a => {
-                const dt = new Date(a.start_time);
-                const dateStr = dt.toLocaleDateString('gu-IN', { day: 'numeric', month: 'short' });
-                const timeStr = dt.toLocaleTimeString('gu-IN', { hour: '2-digit', minute: '2-digit' });
-                const tagCls = (a.status || 'BOOKED').toLowerCase();
-                return `<div class="appt-item">
-      <div class="appt-time">${timeStr}</div>
-      <div class="appt-date">${dateStr}</div>
-      <span class="tag ${tagCls}">${a.status || 'BOOKED'}</span>
-    </div>`;
-            }).join('');
-        }
-        function startAppointmentRefresh() {
-            loadAppointments();
-            if (apptRefreshInterval) clearInterval(apptRefreshInterval);
-            apptRefreshInterval = setInterval(loadAppointments, 30000);
-        }
-        function stopAppointmentRefresh() {
-            if (apptRefreshInterval) { clearInterval(apptRefreshInterval); apptRefreshInterval = null; }
-        }
-
-        // ── Login ─────────────────────────────────────────────────────────────────────
-        async function doLogin() {
-            const phone = document.getElementById('loginPhone').value.trim();
-            const name = document.getElementById('loginName').value.trim();
-            if (!phone) { showToast('Phone number required.', 'error'); return; }
-            const btn = document.getElementById('loginBtn');
-            btn.disabled = true; btn.textContent = 'Connecting…';
-            try {
-                const r = await fetch('/user/login', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone_number: phone, name: name || null, tenant_id: TENANT_ID })
-                });
-                if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.detail || 'Server error'); }
-                localStorage.setItem('phone_number', phone);
-                if (name) localStorage.setItem('user_name', name);
-                loggedInUserPhone = phone;
-                renderUserBadge(phone, name);
-                document.getElementById('loginOverlay').classList.add('hidden');
-                showToast(`Welcome! 📞 ${phone}`, 'success');
-                startAppointmentRefresh();
-            } catch (e) {
-                showToast(`Login failed: ${e.message}`, 'error');
-            } finally {
-                btn.disabled = false; btn.textContent = '→  Continue to Voice Assistant';
-            }
-        }
-        function doLogout() {
-            localStorage.removeItem('phone_number'); localStorage.removeItem('user_name');
-            loggedInUserPhone = null;
-            document.getElementById('userBadge').style.display = 'none';
-            document.getElementById('logoutBtn').style.display = 'none';
-            stopAppointmentRefresh();
-            if (socket) socket.close();
-            stopMic();
-            clearChat();
-            document.getElementById('loginOverlay').classList.remove('hidden');
-        }
-        function renderUserBadge(phone, name) {
-            document.getElementById('userPhoneLabel').textContent = phone;
-            document.getElementById('userBadge').style.display = 'flex';
-            document.getElementById('logoutBtn').style.display = 'flex';
-            document.getElementById('sideUserName').textContent = name || 'User';
-            document.getElementById('sideUserPhone').textContent = phone;
-            const initials = (name || phone).charAt(0).toUpperCase();
-            document.getElementById('userAvatar').textContent = initials;
-        }
-        async function checkLoginStatus() {
-            const phone = localStorage.getItem('phone_number');
-            const name = localStorage.getItem('user_name');
-            if (!phone) { document.getElementById('loginOverlay').classList.remove('hidden'); return; }
-            try {
-                await fetch('/user/login', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone_number: phone, name: name || null, tenant_id: TENANT_ID })
-                });
-            } catch (e) { }
-            loggedInUserPhone = phone;
-            renderUserBadge(phone, name);
-            document.getElementById('loginOverlay').classList.add('hidden');
-            startAppointmentRefresh();
-        }
-
-        function resetSession() {
-            if (socket) socket.close();
-            stopMic(); clearAudioQueue(); clearChat();
-            showToast('Session reset', 'success');
-        }
-
-        // ── Init ──────────────────────────────────────────────────────────────────────
-        drawIdleWave();
-        loadBotConfig();   // load tenant branding if ?tenant= param present
-        checkLoginStatus();
     </script>
 </body>
-
 </html>

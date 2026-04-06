@@ -278,7 +278,7 @@ def merge_memory(old, new):
 _LANG_NAMES = {
     "gu-IN": ["gujarati", "ગુજરાતી", "gujrati", "guj", "gujaratima", "gujarati ma"],
     "hi-IN": ["hindi", "હિન્દી", "हिंदी", "hindi ma", "hindi mein"],
-    "en-IN": ["english", "ઇંગ્લિશ", "inglish", "angrezi", "અંગ્રેજી", "अंग्रेजी", "eng"],
+    "en-IN": ["english", "ઇંગ્લિશ", "inglish", "angrezi", "અંગ્રેજી", "अंग्रेजी"],
 }
 
 _REQUEST_VERBS = [
@@ -308,7 +308,14 @@ def detect_requested_language(text: str) -> Optional[str]:
     if not has_verb and not is_short:
         return None
 
-    matches = {code: any(n in t for n in names)
+    def _name_present(name: str) -> bool:
+        # For ASCII/roman names, require token boundary match to avoid
+        # accidental switches from substrings (e.g., "engagement" -> "eng").
+        if re.fullmatch(r"[a-z ]+", name):
+            return re.search(rf"(?<![a-z]){re.escape(name)}(?![a-z])", t) is not None
+        return name in t
+
+    matches = {code: any(_name_present(n) for n in names)
                for code, names in _LANG_NAMES.items()}
     hits = [code for code, found in matches.items() if found]
     if len(hits) != 1:
@@ -318,6 +325,93 @@ def detect_requested_language(text: str) -> Optional[str]:
 
 def _lang_label(lang_code: str) -> str:
     return {"en-IN": "English", "hi-IN": "Hindi", "gu-IN": "Gujarati"}.get(lang_code, lang_code)
+
+
+def _normalize_lang_code(lang_code: Optional[str]) -> str:
+    """Normalizes aliases/labels to canonical language codes."""
+    if not lang_code:
+        return "en-IN"
+    raw = str(lang_code).strip()
+    lowered = raw.lower()
+    alias_map = {
+        "gu": "gu-IN",
+        "gu-in": "gu-IN",
+        "gujarati": "gu-IN",
+        "hi": "hi-IN",
+        "hi-in": "hi-IN",
+        "hindi": "hi-IN",
+        "en": "en-IN",
+        "en-in": "en-IN",
+        "english": "en-IN",
+    }
+    return alias_map.get(lowered, raw)
+
+
+def _infer_lang_from_text(text: str) -> Optional[str]:
+    """Lightweight script-based fallback inference."""
+    if not text:
+        return None
+    # Gujarati Unicode block
+    if re.search(r"[\u0A80-\u0AFF]", text):
+        return "gu-IN"
+    # Devanagari block
+    if re.search(r"[\u0900-\u097F]", text):
+        return "hi-IN"
+    return None
+
+
+def _build_out_of_hours_reply(lang_code: str, req_time: Optional[str], ranges: str) -> str:
+    """
+    Build an out-of-hours fallback reply in the active conversation language.
+    This path is deterministic (no extra LLM call), so we must localize it here.
+    """
+    if lang_code == "gu-IN":
+        if req_time:
+            return (
+                f"{req_time} માટે સ્લોટ ઉપલબ્ધ નથી કારણ કે તે બિઝનેસ કલાકોથી બહાર છે. "
+                f"અમે માત્ર આ સમયગાળા દરમિયાન એપોઇન્ટમેન્ટ સ્વીકારીએ છીએ: {ranges}. "
+                "કૃપા કરીને આ સમયગાળામાંથી સમય પસંદ કરો."
+            )
+        return (
+            f"તમે માંગેલો સમય બિઝનેસ કલાકોથી બહાર છે. "
+            f"અમે માત્ર આ સમયગાળા દરમિયાન એપોઇન્ટમેન્ટ સ્વીકારીએ છીએ: {ranges}. "
+            "કૃપા કરીને આ સમયગાળામાંથી સમય પસંદ કરો."
+        )
+
+    if lang_code == "hi-IN":
+        if req_time:
+            return (
+                f"{req_time} पर स्लॉट उपलब्ध नहीं है क्योंकि यह बिजनेस घंटों के बाहर है। "
+                f"हम केवल इन समयों में अपॉइंटमेंट लेते हैं: {ranges}। "
+                "कृपया इन्हीं समयों में से कोई समय चुनें।"
+            )
+        return (
+            f"आपका चुना हुआ समय बिजनेस घंटों के बाहर है। "
+            f"हम केवल इन समयों में अपॉइंटमेंट लेते हैं: {ranges}। "
+            "कृपया इन्हीं समयों में से कोई समय चुनें।"
+        )
+
+    # Default English
+    if req_time:
+        return (
+            f"There is no slot at {req_time} because it is outside business hours. "
+            f"We accept appointments only during {ranges}. "
+            "Please choose a time within these periods."
+        )
+    return (
+        f"That requested time is outside business hours. "
+        f"We accept appointments only during {ranges}. "
+        "Please choose a time within these periods."
+    )
+
+
+def _build_tool_limit_reply(lang_code: str) -> str:
+    lang_code = _normalize_lang_code(lang_code)
+    if lang_code == "gu-IN":
+        return "માફ કરશો, વિનંતી પૂર્ણ કરતી વખતે થોડું તકલીફ આવી. કૃપા કરીને તમારી વિનંતી ફરી એક વાર સ્પષ્ટ રીતે કહો."
+    if lang_code == "hi-IN":
+        return "माफ़ कीजिए, आपकी रिक्वेस्ट पूरी करते समय थोड़ी दिक्कत आई। कृपया अपनी बात एक बार फिर स्पष्ट रूप से कहें।"
+    return "Sorry, I ran into a small issue while completing that request. Please say it again clearly."
 
 
 def _extract_hours_ranges(error_text: str) -> Optional[str]:
@@ -483,8 +577,26 @@ def compute_rms(raw_bytes: bytes) -> float:
     return (sum(s * s for s in samples) / len(samples)) ** 0.5
 
 
-def _get_fallback_message(exc: Exception) -> str:
+def _get_fallback_message(exc: Exception, lang_code: str = "gu-IN") -> str:
+    lang_code = _normalize_lang_code(lang_code)
     err_str = str(exc).lower()
+    if lang_code == "hi-IN":
+        if "rate_limit" in err_str or "429" in err_str:
+            return "माफ़ कीजिए, सर्वर अभी बहुत व्यस्त है। कृपया थोड़ी देर बाद फिर प्रयास करें।"
+        if "timeout" in err_str or "timed out" in err_str:
+            return "माफ़ कीजिए, जवाब आने में अधिक समय लग गया। कृपया फिर से प्रयास करें।"
+        if "connection" in err_str or "network" in err_str:
+            return "नेटवर्क समस्या आई है। कृपया इंटरनेट जाँचें और फिर बोलें।"
+        return "माफ़ कीजिए, कुछ गड़बड़ हो गई। कृपया थोड़ी देर बाद फिर प्रयास करें।"
+    if lang_code == "en-IN":
+        if "rate_limit" in err_str or "429" in err_str:
+            return "Sorry, the server is busy right now. Please try again in a moment."
+        if "timeout" in err_str or "timed out" in err_str:
+            return "Sorry, that took too long to process. Please try again."
+        if "connection" in err_str or "network" in err_str:
+            return "There seems to be a network issue. Please check your connection and try again."
+        return "Sorry, something went wrong. Please try again shortly."
+    # Gujarati default
     if "rate_limit" in err_str or "429" in err_str:
         return "માફ કરશો, અત્યારે સર્વર ખૂબ વ્યસ્ત છે. થોડી વાર પછી ફરી પ્રયત્ન કરો."
     if "timeout" in err_str or "timed out" in err_str:
@@ -576,6 +688,7 @@ async def run_brain(
     t0    = datetime.now()
     today = t0.strftime("%Y-%m-%d")
     day   = t0.strftime("%A")
+    current_time_ist = t0.strftime("%H:%M:%S")
 
     log("[NORMALIZER]", f"Before: {user_text}")
     user_text = normalize_gujarati_time(user_text)
@@ -749,7 +862,9 @@ async def run_brain(
     # ── Build system prompt ───────────────────────────────────────────────────
     memory_context = f"\n\n=== MEMORY STATE ===\n{json.dumps(updated_memory)}"
     system_prompt  = (
-        prompts.get_system_prompt(today, day, bot_config, enabled_modules)
+        prompts.get_system_prompt(
+            today, day, bot_config, enabled_modules, current_time_ist=current_time_ist
+        )
         + memory_context
     )
     preferred_lang = updated_memory.get("language_preference")
@@ -807,6 +922,12 @@ async def run_brain(
         tool_iteration += 1
         if tool_iteration > max_tool_iterations:
             log("[TOOLS]", f"Max tool iterations ({max_tool_iterations}). Forcing response.")
+            active_lang = (
+                session_data.get("memory", {}).get("language_preference")
+                or tts_lang
+                or "en-IN"
+            )
+            ai_msg = AIMessage(content=_build_tool_limit_reply(active_lang))
             break
         log("[TOOLS]", f"Iteration #{tool_iteration} — {len(ai_msg.tool_calls)} tool(s)")
         history.append(ai_msg)
@@ -874,18 +995,20 @@ async def run_brain(
                 except Exception:
                     req_time = None
 
-            if req_time:
-                reply = (
-                    f"There is no slot at {req_time} because it is outside business hours. "
-                    f"We accept appointments only during {ranges}. "
-                    "Please choose a time within these periods."
-                )
-            else:
-                reply = (
-                    f"That requested time is outside business hours. "
-                    f"We accept appointments only during {ranges}. "
-                    "Please choose a time within these periods."
-                )
+            # Respect user's selected language even in deterministic fallback branches.
+            active_lang = (
+                session_data.get("memory", {}).get("language_preference")
+                or tts_lang
+                or "en-IN"
+            )
+            active_lang = _normalize_lang_code(active_lang)
+            # If user spoke in Gujarati/Hindi script this turn, prefer that script language.
+            inferred_turn_lang = _infer_lang_from_text(user_text)
+            if inferred_turn_lang:
+                active_lang = inferred_turn_lang
+            log("[OUT_OF_HOURS]", f"active_lang={active_lang} req_time={req_time} ranges={ranges}")
+            reply = _build_out_of_hours_reply(active_lang, req_time, ranges)
+            log("[OUT_OF_HOURS]", f"reply='{reply[:120]}'")
             ai_msg = AIMessage(content=reply)
             break
 

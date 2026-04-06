@@ -351,8 +351,14 @@ class StreamingTTSSession:
 # ── HTML page routes ───────────────────────────────────────────────────────────
 
 @app.get("/")
-async def serve_customer():
+async def serve_home(tenant: Optional[str] = None, id: Optional[str] = None):
+    if tenant or id:
+        return FileResponse("static/customer.html")
     return FileResponse("static/index.html")
+
+@app.get("/customer")
+async def serve_customer():
+    return FileResponse("static/customer.html")
 
 @app.get("/admin")
 async def serve_admin():
@@ -1403,10 +1409,12 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
                             tts_convert_fn=tts_convert,
                         )
                     except Exception as e:
-                        fallback_text = _get_fallback_message(e)
                         bot_cfg = chat_sessions.get(session_id, {}).get("bot_config") or {}
+                        memory = chat_sessions.get(session_id, {}).get("memory") or {}
+                        active_lang = memory.get("language_preference") or bot_cfg.get("language_code", "gu-IN")
+                        fallback_text = _get_fallback_message(e, active_lang)
                         fb_speaker = _normalize_tts_speaker(bot_cfg.get("tts_speaker", DEFAULT_TTS_SPEAKER))
-                        fb_lang    = bot_cfg.get("language_code", "gu-IN")
+                        fb_lang    = active_lang or bot_cfg.get("language_code", "gu-IN")
                         try:
                             await websocket.send_json({
                                 "type": "ai_text", "text": fallback_text, "chunk_count": 1
