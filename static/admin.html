@@ -3415,9 +3415,10 @@
         const note = document.getElementById('module-request-note')?.value?.trim() || '';
         btn.textContent = 'Sending...';
         btn.disabled = true;
+        let response = null;
         // POST to backend — backend can email superadmin or store the request
         try {
-          await apiFetch('/admin/modules/request', {
+          response = await apiFetch('/admin/modules/request', {
             method: 'POST',
             body: JSON.stringify({ module_name: moduleName, requested_state: enable, note })
           });
@@ -3426,7 +3427,11 @@
           console.warn('Module request endpoint not yet implemented:', e.message);
         }
         btn.closest('[style*=position]').remove();
-        showToast('✅ Request sent! Our team will review and get back to you.', 'success');
+        if (response && response.email_sent === false) {
+          showToast('Request saved, but superadmin email is not configured yet.', 'error');
+          return;
+        }
+        showToast('✅ Request sent! Superadmin has been notified by email.', 'success');
       }
 
       // ══════════════════════════════════════════════════════

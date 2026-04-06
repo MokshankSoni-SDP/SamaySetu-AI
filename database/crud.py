@@ -851,6 +851,8 @@ def _ensure_module_requests_table():
             updated_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_module_requests_status ON module_requests (status, created_at DESC);
+        ALTER TABLE module_requests ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(200);
+        ALTER TABLE module_requests ADD COLUMN IF NOT EXISTS resolved_via VARCHAR(50);
     """
     conn = get_db_connection()
     try:
@@ -885,7 +887,7 @@ def get_all_module_requests() -> List[Dict[str, Any]]:
     _ensure_module_requests_table()
     sql = """
         SELECT mr.id, mr.tenant_id, t.business_name, mr.module_name,
-               mr.requested_state, mr.note, mr.status,
+               mr.requested_state, mr.note, mr.status, mr.resolved_by, mr.resolved_via,
                mr.created_at, mr.updated_at
         FROM module_requests mr
         JOIN tenants t ON t.tenant_id = mr.tenant_id
@@ -914,18 +916,55 @@ def get_all_module_requests() -> List[Dict[str, Any]]:
         conn.close()
 
 
-def resolve_module_request(request_id: str, status: str):
-    """Mark a module request as approved or rejected."""
+def get_module_request_by_id(request_id: str) -> Optional[Dict[str, Any]]:
+    """Return one module request by id."""
     _ensure_module_requests_table()
     sql = """
-        UPDATE module_requests
-        SET status = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s;
+        SELECT mr.id, mr.tenant_id, t.business_name, mr.module_name,
+               mr.requested_state, mr.note, mr.status, mr.resolved_by, mr.resolved_via,
+               mr.created_at, mr.updated_at
+        FROM module_requests mr
+        JOIN tenants t ON t.tenant_id = mr.tenant_id
+        WHERE mr.id = %s
+        LIMIT 1;
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (status, request_id))
+            cur.execute(sql, (request_id,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["id"] = str(d["id"])
+        d["tenant_id"] = str(d["tenant_id"])
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        if d.get("updated_at"):
+            d["updated_at"] = d["updated_at"].isoformat()
+        return d
+    finally:
+        conn.close()
+
+
+def resolve_module_request(request_id: str, status: str, resolved_by: str = "", resolved_via: str = "panel") -> int:
+    """Mark a module request as approved or rejected."""
+    _ensure_module_requests_table()
+    sql = """
+        UPDATE module_requests
+        SET status = %s,
+            resolved_by = %s,
+            resolved_via = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+          AND status = 'pending';
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (status, resolved_by, resolved_via, request_id))
+            updated = cur.rowcount
         conn.commit()
+        return updated
     finally:
         conn.close()

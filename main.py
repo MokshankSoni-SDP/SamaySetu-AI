@@ -20,8 +20,8 @@ from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 from datetime import datetime, date
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request,Depends, Header
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Depends, Header, Query
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -862,6 +862,34 @@ class ModuleSetRequest(BaseModel):
 class ModuleRequestResolve(BaseModel):
     status: str  # 'approved' | 'rejected'
 
+
+def _invalidate_tenant_runtime_caches(tenant_id: str):
+    for sess in chat_sessions.values():
+        if sess.get("tenant_id") == tenant_id:
+            sess.pop("enabled_modules", None)
+    try:
+        from modules.module_registry import invalidate_tools_cache
+        invalidate_tools_cache(tenant_id)
+    except Exception:
+        pass
+
+
+def _decision_html(message: str, ok: bool = True) -> HTMLResponse:
+    color = "#16a34a" if ok else "#dc2626"
+    icon = "Processed" if ok else "Unable to process"
+    html = f"""
+    <html>
+      <head><title>SamaySetu Module Request</title></head>
+      <body style="font-family:Arial,sans-serif;background:#0b1020;color:#f3f4f6;padding:24px;">
+        <div style="max-width:640px;margin:30px auto;background:#121a33;border:1px solid #1f2a4a;border-radius:12px;padding:24px;">
+          <h2 style="margin:0 0 12px;color:{color};">{icon}</h2>
+          <p style="line-height:1.6;margin:0;">{message}</p>
+        </div>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html, status_code=200 if ok else 400)
+
 @app.post("/superadmin/modules/set", dependencies=[Depends(_check_superadmin_token)])
 async def superadmin_set_module(req: ModuleSetRequest):
     """Directly enable/disable a module for any tenant (superadmin override)."""
@@ -873,15 +901,7 @@ async def superadmin_set_module(req: ModuleSetRequest):
     result = await asyncio.to_thread(set_module_enabled, req.tenant_id, req.module_name, req.is_enabled)
     if not result:
         raise HTTPException(status_code=500, detail="Failed to update module")
-    # Invalidate session cache for this tenant
-    for sess in chat_sessions.values():
-        if sess.get("tenant_id") == req.tenant_id:
-            sess.pop("enabled_modules", None)
-    try:
-        from modules.module_registry import invalidate_tools_cache
-        invalidate_tools_cache(req.tenant_id)
-    except Exception:
-        pass
+    _invalidate_tenant_runtime_caches(req.tenant_id)
     return {"ok": True, "tenant_id": req.tenant_id, "module_name": req.module_name, "is_enabled": req.is_enabled}
 
 
@@ -911,6 +931,13 @@ async def admin_request_module(req: Request, session=Depends(_check_admin_token)
     requested_state = bool(data.get("requested_state", True))
     note = str(data.get("note", ""))[:500]
 
+    try:
+        from modules.module_registry import ALL_MODULES
+        if module_name not in ALL_MODULES:
+            raise HTTPException(status_code=400, detail=f"Unknown module: {module_name}")
+    except ImportError:
+        pass
+
     if not DB_AVAILABLE:
         return {"ok": True, "queued": True}
     try:
@@ -919,7 +946,25 @@ async def admin_request_module(req: Request, session=Depends(_check_admin_token)
             create_module_request,
             session["tenant_id"], module_name, requested_state, note
         )
-        return {"ok": True, "request_id": result}
+        email_sent = False
+        email_error = None
+        try:
+            from services.module_request_email import send_module_request_email
+            await asyncio.to_thread(
+                send_module_request_email,
+                request_id=result,
+                tenant_id=session["tenant_id"],
+                business_name=session.get("business_name", ""),
+                admin_email=session.get("email", ""),
+                module_name=module_name,
+                requested_state=requested_state,
+                note=note,
+            )
+            email_sent = True
+        except Exception as mail_err:
+            email_error = str(mail_err)
+            print(f"[MODULE_REQUEST] email send failed: {mail_err}")
+        return {"ok": True, "request_id": result, "email_sent": email_sent, "email_error": email_error}
     except (ImportError, Exception) as e:
         # Graceful degradation — log and return ok so frontend shows success
         print(f"[MODULE_REQUEST] Could not save request (table may not exist): {e}")
@@ -929,14 +974,90 @@ async def admin_request_module(req: Request, session=Depends(_check_admin_token)
 @app.patch("/superadmin/module-requests/{request_id}", dependencies=[Depends(_check_superadmin_token)])
 async def superadmin_resolve_module_request(request_id: str, req: ModuleRequestResolve):
     """Mark a module request as approved or rejected."""
+    if req.status not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="status must be 'approved' or 'rejected'")
     if not DB_AVAILABLE:
         return {"ok": True}
     try:
         from database.crud import resolve_module_request
-        await asyncio.to_thread(resolve_module_request, request_id, req.status)
+        updated = await asyncio.to_thread(
+            resolve_module_request,
+            request_id,
+            req.status,
+            os.getenv("SUPERADMIN_EMAIL", "superadmin-panel"),
+            "panel",
+        )
+        return {"ok": True, "updated": updated}
     except (ImportError, Exception) as e:
         print(f"[MODULE_REQUEST] Could not resolve request: {e}")
     return {"ok": True}
+
+
+@app.get("/email/module-requests/decision")
+async def email_module_request_decision(token: str = Query(...)):
+    """Public endpoint used by secure email decision links."""
+    if not DB_AVAILABLE:
+        return _decision_html("Database is unavailable. Please try again later.", ok=False)
+
+    try:
+        from services.module_request_email import verify_action_token
+        payload = verify_action_token(token)
+    except Exception as e:
+        return _decision_html(f"Invalid or expired link ({e}).", ok=False)
+
+    request_id = payload.get("rid", "")
+    decision = payload.get("action")  # approved | rejected
+
+    try:
+        from database.crud import get_module_request_by_id, resolve_module_request
+        req_row = await asyncio.to_thread(get_module_request_by_id, request_id)
+    except Exception as e:
+        return _decision_html(f"Failed to load request: {e}", ok=False)
+
+    if not req_row:
+        return _decision_html("Request not found.", ok=False)
+
+    if req_row.get("status") != "pending":
+        status = req_row.get("status", "resolved")
+        return _decision_html(f"This request is already {status}. No action needed.", ok=True)
+
+    if (
+        payload.get("tid") != req_row.get("tenant_id")
+        or payload.get("mod") != req_row.get("module_name")
+        or bool(payload.get("state")) != bool(req_row.get("requested_state"))
+    ):
+        return _decision_html("Link validation failed for this request.", ok=False)
+
+    try:
+        if decision == "approved":
+            result = await asyncio.to_thread(
+                set_module_enabled,
+                req_row["tenant_id"],
+                req_row["module_name"],
+                bool(req_row["requested_state"]),
+            )
+            if not result:
+                return _decision_html("Could not apply module change.", ok=False)
+            _invalidate_tenant_runtime_caches(req_row["tenant_id"])
+
+        await asyncio.to_thread(
+            resolve_module_request,
+            request_id,
+            decision,
+            os.getenv("SUPERADMIN_EMAIL", "superadmin-email-link"),
+            "email",
+        )
+    except Exception as e:
+        return _decision_html(f"Failed to process decision: {e}", ok=False)
+
+    if decision == "approved":
+        state_word = "enabled" if bool(req_row["requested_state"]) else "disabled"
+        return _decision_html(
+            f"Request approved. Module '{req_row['module_name']}' has been {state_word} "
+            f"for tenant '{req_row['business_name'] or req_row['tenant_id']}'.",
+            ok=True,
+        )
+    return _decision_html("Request rejected successfully. No module changes were applied.", ok=True)
 
 
 # ── Sarvam STT warm-up ─────────────────────────────────────────────────────────

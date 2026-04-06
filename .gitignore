@@ -3,3 +3,4 @@ venv
 service_account.json
 __pycache__
 temp*
+gen_secrets.py
