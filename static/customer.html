@@ -626,7 +626,8 @@
         #loginOverlay {
             position: fixed;
             inset: 0;
-            background: rgba(10, 12, 16, .97); /* fully opaque — no blur needed */
+            background: rgba(10, 12, 16, .97);
+            /* fully opaque — no blur needed */
             /* backdrop-filter removed */
             z-index: 1000;
             display: flex;
@@ -802,6 +803,7 @@
             font-size: 13px;
             color: var(--muted);
         }
+
         /* ── Modern SaaS Theme Layer (performance-optimised) ──────────────────
          *  Key changes vs original Codex version:
          *  1. body radial-gradients moved to body::before (position:fixed above)
@@ -851,8 +853,6 @@
         }
 
         /* Ensure everything stacks above the fixed background */
-        .toast-container,
-        #loginOverlay,
         .app,
         .landing,
         .lp-nav {
@@ -865,7 +865,8 @@
             position: sticky;
             top: 0;
             z-index: 14;
-            background: rgba(246, 248, 255, .97); /* near-opaque; no blur needed */
+            background: rgba(246, 248, 255, .97);
+            /* near-opaque; no blur needed */
             border-bottom: 1px solid var(--border);
             /* backdrop-filter removed — sticky blur repaints on every scroll frame */
             display: flex;
@@ -918,7 +919,8 @@
             border-radius: 24px;
             border: 1px solid var(--border);
             overflow: hidden;
-            background: var(--surface); /* solid white — no translucent bg needed */
+            background: var(--surface);
+            /* solid white — no translucent bg needed */
             box-shadow: 0 8px 30px rgba(79, 70, 229, .09);
             contain: paint;
         }
@@ -1057,7 +1059,8 @@
             border-radius: 24px;
             overflow: hidden;
             box-shadow: 0 8px 32px rgba(79, 70, 229, .09);
-            background: var(--surface); /* solid — no backdrop-filter */
+            background: var(--surface);
+            /* solid — no backdrop-filter */
             /* NO backdrop-filter: blur — was the main scroll-jank culprit */
             contain: paint;
         }
@@ -1079,7 +1082,8 @@
         }
 
         .sidebar {
-            background: #fafbff; /* solid; was semi-transparent inside blurred container */
+            background: #fafbff;
+            /* solid; was semi-transparent inside blurred container */
         }
 
         .user-card,
@@ -1145,6 +1149,7 @@
         }
 
         @media (max-width: 1100px) {
+
             .lp-nav,
             .landing {
                 margin: 12px;
@@ -1195,126 +1200,128 @@
         </div>
     </div>
 
-    
+
 
     <div class="app-shell" id="voiceWorkspace">
-    <div class="app">
-        <header>
-            <div class="logo">
-                <div class="logo-mark" id="hdrLogoMark">સ</div>
-                <div class="logo-text">
-                    <h1 id="hdrBotName">SamaySetu AI</h1>
-                    <span id="hdrBizDesc">Gujarati Voice Booking Assistant</span>
-                </div>
-            </div>
-            <div class="header-right">
-                <div class="user-badge" id="userBadge" style="display:none">
-                    <span>📞</span>
-                    <span class="user-phone-hdr" id="userPhoneLabel"></span>
-                </div>
-                <button class="logout-btn" id="logoutBtn" style="display:none"
-                    onclick="doLogout()">✕&nbsp;Logout</button>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
-                    <div class="status-dot" id="connDot"></div>
-                    <span id="connLabel">Disconnected</span>
-                </div>
-            </div>
-        </header>
-
-        <!-- Left sidebar: user profile + appointments -->
-        <aside class="sidebar">
-            <div>
-                <div class="panel-title">My Profile</div>
-                <div class="user-card">
-                    <div class="user-avatar" id="userAvatar">👤</div>
-                    <div class="user-name" id="sideUserName">—</div>
-                    <div class="user-phone-disp" id="sideUserPhone">—</div>
-                </div>
-            </div>
-
-            <div>
-                <div class="panel-title">My Appointments</div>
-                <div class="appt-list" id="apptList">
-                    <div style="font-size:12px;color:var(--muted);">Loading...</div>
-                </div>
-            </div>
-
-            <div>
-                <div class="panel-title">Quick Actions</div>
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    <button class="quick-action-btn" onclick="addMessage('user','નવી નિમણૂક બુક કરો')">
-                        📅 <span>Book New Appointment</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="addMessage('user','મારી નિમણૂક રદ કરો')">
-                        ✕ <span>Cancel Appointment</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="addMessage('user','સમય બદલો')">
-                        🔄 <span>Reschedule</span>
-                    </button>
-                    <button class="quick-action-btn" onclick="loadAppointments()">
-                        🔃 <span>Refresh Appointments</span>
-                    </button>
-                </div>
-            </div>
-
-            <div>
-                <div class="panel-title">Business Hours</div>
-                <div
-                    style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px;">
-                    <div style="font-size:13px;color:var(--text);" id="bizHoursDisplay">9:00 AM – 6:00 PM</div>
-                    <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="slotDisplay">30 min slots</div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Main stage: mic + chat -->
-        <main class="main-stage">
-            <div class="bot-greeting">
-                <h2 id="greetingTitle">નમસ્તે! 🙏</h2>
-                <p id="greetingBody">હું <span id="botNameInline">SamaySetu AI</span> છું. માઇક્રોફોન દબાવો અને
-                    ગુજરાતીમાં બોલો.</p>
-            </div>
-
-            <div class="mic-ring-wrap" id="micRingWrap">
-                <div class="ring ring-1"></div>
-                <div class="ring ring-2"></div>
-                <div class="ring ring-3"></div>
-                <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Click to speak">
-                    <svg id="micIcon" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                            d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 015 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
-                    </svg>
-                </button>
-            </div>
-
-            <div class="state-label" id="stateLabel">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
-            <div class="commit-bar" id="commitBar">
-                <div class="commit-bar-fill" id="commitBarFill"></div>
-            </div>
-            <div class="transcript-box empty" id="transcriptBox">તમારો અવાજ અહીં દેખાશે...</div>
-            <canvas id="waveCanvas" width="480" height="60"></canvas>
-
-            <div class="chat-feed">
-                <div class="chat-header">
-                    <span>Conversation</span>
-                    <button class="chat-clear-btn" onclick="clearChat()">Clear</button>
-                </div>
-                <div class="chat-body" id="chatBody">
-                    <div class="msg ai">
-                        <div id="welcomeMsg">નમસ્તે! હું SamaySetu AI છું. નિમણૂક બુક, રદ, કે સમય બદલવા માટે કહો.</div>
-                        <div class="msg-meta">AI · now</div>
+        <div class="app">
+            <header>
+                <div class="logo">
+                    <div class="logo-mark" id="hdrLogoMark">સ</div>
+                    <div class="logo-text">
+                        <h1 id="hdrBotName">SamaySetu AI</h1>
+                        <span id="hdrBizDesc">Gujarati Voice Booking Assistant</span>
                     </div>
                 </div>
-            </div>
-        </main>
+                <div class="header-right">
+                    <div class="user-badge" id="userBadge" style="display:none">
+                        <span>📞</span>
+                        <span class="user-phone-hdr" id="userPhoneLabel"></span>
+                    </div>
+                    <button class="logout-btn" id="logoutBtn" style="display:none"
+                        onclick="doLogout()">✕&nbsp;Logout</button>
+                    <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+                        <div class="status-dot" id="connDot"></div>
+                        <span id="connLabel">Disconnected</span>
+                    </div>
+                </div>
+            </header>
 
-        <footer>
-            <div id="footerCopy">© 2025 SamaySetu AI · Powered by Sarvam + Groq</div>
-            <div>
-                <button class="footer-btn danger" onclick="resetSession()">↺ Reset Session</button>
-            </div>
-        </footer>
-    </div>
+            <!-- Left sidebar: user profile + appointments -->
+            <aside class="sidebar">
+                <div>
+                    <div class="panel-title">My Profile</div>
+                    <div class="user-card">
+                        <div class="user-avatar" id="userAvatar">👤</div>
+                        <div class="user-name" id="sideUserName">—</div>
+                        <div class="user-phone-disp" id="sideUserPhone">—</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel-title">My Appointments</div>
+                    <div class="appt-list" id="apptList">
+                        <div style="font-size:12px;color:var(--muted);">Loading...</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel-title">Quick Actions</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <button class="quick-action-btn" onclick="addMessage('user','નવી નિમણૂક બુક કરો')">
+                            📅 <span>Book New Appointment</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="addMessage('user','મારી નિમણૂક રદ કરો')">
+                            ✕ <span>Cancel Appointment</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="addMessage('user','સમય બદલો')">
+                            🔄 <span>Reschedule</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="loadAppointments()">
+                            🔃 <span>Refresh Appointments</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel-title">Business Hours</div>
+                    <div
+                        style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px;">
+                        <div style="font-size:13px;color:var(--text);" id="bizHoursDisplay">9:00 AM – 6:00 PM</div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="slotDisplay">30 min slots
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main stage: mic + chat -->
+            <main class="main-stage">
+                <div class="bot-greeting">
+                    <h2 id="greetingTitle">નમસ્તે! 🙏</h2>
+                    <p id="greetingBody">હું <span id="botNameInline">SamaySetu AI</span> છું. માઇક્રોફોન દબાવો અને
+                        ગુજરાતીમાં બોલો.</p>
+                </div>
+
+                <div class="mic-ring-wrap" id="micRingWrap">
+                    <div class="ring ring-1"></div>
+                    <div class="ring ring-2"></div>
+                    <div class="ring ring-3"></div>
+                    <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Click to speak">
+                        <svg id="micIcon" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zm-1 15.93A7.001 7.001 0 015 11a1 1 0 00-2 0 9 9 0 008 8.945V22H9a1 1 0 000 2h6a1 1 0 000-2h-2v-2.055A9.001 9.001 0 0021 11a1 1 0 00-2 0 7 7 0 01-6 6.93z" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="state-label" id="stateLabel">બટન દબાવો અને બોલવાનું શરૂ કરો</div>
+                <div class="commit-bar" id="commitBar">
+                    <div class="commit-bar-fill" id="commitBarFill"></div>
+                </div>
+                <div class="transcript-box empty" id="transcriptBox">તમારો અવાજ અહીં દેખાશે...</div>
+                <canvas id="waveCanvas" width="480" height="60"></canvas>
+
+                <div class="chat-feed">
+                    <div class="chat-header">
+                        <span>Conversation</span>
+                        <button class="chat-clear-btn" onclick="clearChat()">Clear</button>
+                    </div>
+                    <div class="chat-body" id="chatBody">
+                        <div class="msg ai">
+                            <div id="welcomeMsg">નમસ્તે! હું SamaySetu AI છું. નિમણૂક બુક, રદ, કે સમય બદલવા માટે કહો.
+                            </div>
+                            <div class="msg-meta">AI · now</div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <footer>
+                <div id="footerCopy">© 2025 SamaySetu AI · Powered by Sarvam + Groq</div>
+                <div>
+                    <button class="footer-btn danger" onclick="resetSession()">↺ Reset Session</button>
+                </div>
+            </footer>
+        </div>
     </div>
 
     <script>
@@ -1928,7 +1935,7 @@
             if (socket) socket.close();
             stopMic();
             clearChat();
-            document.getElementById('loginOverlay').classList.add('hidden');
+            document.getElementById('loginOverlay').classList.remove('hidden');
             document.getElementById('voiceWorkspace').scrollIntoView({ behavior: 'smooth' });
         }
         function renderUserBadge(phone, name) {
@@ -1943,7 +1950,7 @@
         async function checkLoginStatus() {
             const phone = localStorage.getItem('phone_number');
             const name = localStorage.getItem('user_name');
-            if (!phone) { document.getElementById('loginOverlay').classList.add('hidden'); return; }
+            if (!phone) { document.getElementById('loginOverlay').classList.remove('hidden'); return; }
             try {
                 await fetch('/user/login', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -427,7 +427,7 @@ async def admin_login(req: AdminLoginRequest):
     if admin["password_hash"] != _hash_password(req.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not admin.get("tenant_active", True):
-        raise HTTPException(status_code=403, detail="This account is suspended")
+        raise HTTPException(status_code=403, detail="Your account has been suspended by the platform administrator. Please contact support.")
     token = secrets.token_hex(32)
     admin_sessions[token] = {
         "tenant_id":     admin["tenant_id"],

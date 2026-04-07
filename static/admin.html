@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -2195,7 +2195,7 @@
      *  5. .content-area gets will-change:transform to promote to GPU layer.
      *  6. Heavy box-shadows tightened (spread reduced, opacity lowered).
      * ─────────────────────────────────────────────────────────────────────── */
-    :root {
+    :root[data-theme="light"] {
       --bg: #f5f7ff;
       --surface: #ffffff;
       --panel: #f8f9ff;
@@ -2229,8 +2229,6 @@
     }
 
     /* Ensure stacking order: body::before is behind everything */
-    .toast-container,
-    #adminLogin,
     .layout {
       position: relative;
       z-index: 1;
@@ -2265,7 +2263,7 @@
     .calendar-status,
     .step-card,
     .microstep {
-      background: #fff;
+      background: var(--surface);
       border-color: var(--border);
     }
 
@@ -2294,7 +2292,7 @@
     .btn-danger,
     .copy-btn,
     .step-done-btn {
-      background: #fff;
+      background: var(--surface);
       border-color: var(--border);
     }
 
@@ -2329,7 +2327,7 @@
     }
 
     .toast {
-      background: #fff;
+      background: var(--surface);
       border-color: var(--border);
       box-shadow: 0 4px 16px rgba(79, 70, 229, .10);
     }
@@ -3605,7 +3603,7 @@
           showToast('Request saved, but superadmin email is not configured yet.', 'error');
           return;
         }
-        showToast('✅ Request sent! Superadmin has been notified by email.', 'success');
+        showToast('✅ Request sent! Our has been notified by email.', 'success');
       }
 
       // ══════════════════════════════════════════════════════
