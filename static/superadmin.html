@@ -341,8 +341,7 @@
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, .7);
-      backdrop-filter: blur(6px);
+      background: rgba(0, 0, 0, .85);
       z-index: 1000;
       display: flex;
       align-items: center;
@@ -459,7 +458,6 @@
       position: fixed;
       inset: 0;
       background: rgba(6, 8, 13, .97);
-      backdrop-filter: blur(10px);
       z-index: 9000;
       display: flex;
       align-items: center;
@@ -529,11 +527,21 @@
       opacity: .5;
       cursor: not-allowed;
     }
-    /* Premium SaaS Theme Layer */
+    /* ── Premium SaaS Theme Layer (performance-optimised) ──────────────────
+     *  Key changes vs original Codex version:
+     *  1. body radial-gradients moved to body::before with position:fixed
+     *     so they are on a separate composited layer and NEVER repaint on scroll.
+     *  2. backdrop-filter removed from .layout (full-window blur = catastrophic
+     *     repaint cost every scroll frame).
+     *  3. backdrop-filter removed from #superLogin.
+     *  4. .layout gets contain:paint so browser limits repaint to that box.
+     *  5. .content gets will-change:transform to promote to GPU layer.
+     *  6. Heavy box-shadows tightened (spread reduced, opacity lowered).
+     * ─────────────────────────────────────────────────────────────────────── */
     :root {
       --bg: #f5f7ff;
-      --surface: rgba(255, 255, 255, .9);
-      --panel: #ffffff;
+      --surface: #ffffff;
+      --panel: #f8f9ff;
       --border: rgba(79, 70, 229, .14);
       --accent: #4f46e5;
       --accent2: #7c3aed;
@@ -544,10 +552,30 @@
       --font-body: 'DM Sans', sans-serif;
     }
 
+    /* Fixed pseudo-element background — zero repaint cost during scroll */
     body {
-      background: radial-gradient(circle at 10% 10%, rgba(79, 70, 229, .08), transparent 26%),
-        radial-gradient(circle at 90% 18%, rgba(6, 182, 212, .08), transparent 30%),
-        var(--bg);
+      background: var(--bg);
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(79, 70, 229, .08), transparent 26%),
+        radial-gradient(circle at 90% 18%, rgba(6, 182, 212, .08), transparent 30%);
+      will-change: transform;
+    }
+
+    .toast-container,
+    #superLogin,
+    .modal-overlay,
+    .layout {
+      position: relative;
+      z-index: 1;
     }
 
     .layout {
@@ -556,9 +584,13 @@
       border-radius: 24px;
       overflow: hidden;
       border: 1px solid var(--border);
-      box-shadow: 0 24px 62px rgba(79, 70, 229, .13);
-      background: rgba(255, 255, 255, .72);
-      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(79, 70, 229, .09);
+      background: var(--surface);
+      contain: paint;
+    }
+
+    .content {
+      will-change: transform;
     }
 
     .sidebar,
@@ -582,7 +614,12 @@
     .sl-btn {
       color: #fff;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
-      box-shadow: 0 12px 28px rgba(79, 70, 229, .22);
+      box-shadow: 0 4px 14px rgba(79, 70, 229, .18);
+    }
+
+    .btn-primary:hover,
+    .sl-btn:hover {
+      transform: translateY(-1px);
     }
 
     .btn-ghost,
@@ -599,12 +636,11 @@
 
     .card,
     .stat-card {
-      box-shadow: 0 10px 28px rgba(79, 70, 229, .08);
+      box-shadow: 0 2px 12px rgba(79, 70, 229, .06);
     }
 
     #superLogin {
-      background: rgba(37, 45, 93, .24);
-      backdrop-filter: blur(10px);
+      background: rgba(37, 45, 93, .88);
     }
 
     .sl-title {
@@ -616,7 +652,7 @@
     .toast {
       background: #fff;
       border-color: var(--border);
-      box-shadow: 0 10px 28px rgba(79, 70, 229, .12);
+      box-shadow: 0 4px 16px rgba(79, 70, 229, .10);
     }
 
     @media (max-width: 1100px) {

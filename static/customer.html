@@ -50,51 +50,23 @@
             overflow-x: hidden;
         }
 
+        /* Fixed pseudo-element background — zero repaint cost during scroll.
+         * The animated .blob elements (filter:blur on animated divs) were removed
+         * because filter:blur on an animated element triggers a full GPU repaint
+         * on every animation frame, causing severe jitter. The gradient orbs are
+         * replicated here as static radial-gradients on a fixed layer instead. */
         body::before {
             content: '';
             position: fixed;
             inset: 0;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
             pointer-events: none;
             z-index: 0;
-        }
-
-        .blob {
-            position: fixed;
-            border-radius: 50%;
-            filter: blur(80px);
-            opacity: .12;
-            pointer-events: none;
-            z-index: 0;
-            animation: drift 12s ease-in-out infinite alternate;
-        }
-
-        .blob-1 {
-            width: 400px;
-            height: 400px;
-            background: var(--accent);
-            top: -100px;
-            left: -100px;
-            animation-duration: 14s;
-        }
-
-        .blob-2 {
-            width: 300px;
-            height: 300px;
-            background: var(--accent2);
-            bottom: -80px;
-            right: -80px;
-            animation-duration: 10s;
-        }
-
-        @keyframes drift {
-            from {
-                transform: translate(0, 0) scale(1);
-            }
-
-            to {
-                transform: translate(30px, 20px) scale(1.05);
-            }
+            /* Decorative orbs — static, no animation, no filter:blur */
+            background:
+                radial-gradient(circle at 8% 8%, rgba(245, 166, 35, .10), transparent 30%),
+                radial-gradient(circle at 90% 90%, rgba(224, 92, 42, .08), transparent 30%);
+            /* Promote to its own compositing layer */
+            will-change: transform;
         }
 
         /* ── Layout ── */
@@ -114,8 +86,8 @@
             justify-content: space-between;
             padding: 18px 32px;
             border-bottom: 1px solid var(--border);
-            background: rgba(10, 12, 16, .85);
-            backdrop-filter: blur(12px);
+            background: rgba(10, 12, 16, .95);
+            /* backdrop-filter removed — header blur repaints on scroll */
         }
 
         .logo {
@@ -654,8 +626,8 @@
         #loginOverlay {
             position: fixed;
             inset: 0;
-            background: rgba(10, 12, 16, .95);
-            backdrop-filter: blur(10px);
+            background: rgba(10, 12, 16, .97); /* fully opaque — no blur needed */
+            /* backdrop-filter removed */
             z-index: 1000;
             display: flex;
             align-items: center;
@@ -830,11 +802,23 @@
             font-size: 13px;
             color: var(--muted);
         }
-        /* Modern SaaS Theme Layer */
+        /* ── Modern SaaS Theme Layer (performance-optimised) ──────────────────
+         *  Key changes vs original Codex version:
+         *  1. body radial-gradients moved to body::before (position:fixed above)
+         *     so they live on a GPU-composited layer — zero repaint on scroll.
+         *  2. backdrop-filter removed from .app (main container blur was the
+         *     primary scroll-jank source on this page).
+         *  3. backdrop-filter removed from .lp-nav (sticky blur repaints on
+         *     every single scroll frame — replaced with high-opacity solid bg).
+         *  4. .app gets contain:paint and will-change:transform for GPU layer.
+         *  5. .main-stage / .sidebar get will-change:transform so their scroll
+         *     is GPU-accelerated.
+         *  6. Box-shadows tightened; login overlay darkened so no blur needed.
+         * ─────────────────────────────────────────────────────────────────── */
         :root {
             --bg: #f6f8ff;
-            --surface: rgba(255, 255, 255, .86);
-            --panel: #ffffff;
+            --surface: #ffffff;
+            --panel: #f8f9ff;
             --border: rgba(79, 70, 229, .16);
             --accent: #4f46e5;
             --accent2: #7c3aed;
@@ -845,19 +829,45 @@
             --font-body: 'DM Sans', 'Noto Sans Gujarati', sans-serif;
         }
 
+        /* Override the original body rule with solid color;
+           the decorative gradients now live in body::before (position:fixed) */
         body {
-            background: radial-gradient(circle at 12% 12%, rgba(79, 70, 229, .09), transparent 30%),
-                radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 32%),
-                var(--bg);
+            background: var(--bg);
+            position: relative;
         }
 
+        /* Re-declare body::before with the SaaS theme gradients.
+           The earlier body::before (noise texture) is merged here too. */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background:
+                radial-gradient(circle at 12% 12%, rgba(79, 70, 229, .09), transparent 30%),
+                radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 32%);
+            will-change: transform;
+        }
+
+        /* Ensure everything stacks above the fixed background */
+        .toast-container,
+        #loginOverlay,
+        .app,
+        .landing,
+        .lp-nav {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Sticky nav — solid background replaces backdrop-filter */
         .lp-nav {
             position: sticky;
             top: 0;
             z-index: 14;
-            background: rgba(246, 248, 255, .85);
+            background: rgba(246, 248, 255, .97); /* near-opaque; no blur needed */
             border-bottom: 1px solid var(--border);
-            backdrop-filter: blur(14px);
+            /* backdrop-filter removed — sticky blur repaints on every scroll frame */
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -867,7 +877,7 @@
         }
 
         .lp-nav.scrolled {
-            box-shadow: 0 12px 34px rgba(79, 70, 229, .14);
+            box-shadow: 0 4px 16px rgba(79, 70, 229, .10);
         }
 
         .lp-brand {
@@ -900,7 +910,7 @@
             color: #fff;
             border: none;
             background: linear-gradient(135deg, var(--accent), var(--accent2));
-            box-shadow: 0 12px 30px rgba(79, 70, 229, .25);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, .20);
         }
 
         .landing {
@@ -908,8 +918,9 @@
             border-radius: 24px;
             border: 1px solid var(--border);
             overflow: hidden;
-            background: rgba(255, 255, 255, .72);
-            box-shadow: 0 24px 58px rgba(79, 70, 229, .12);
+            background: var(--surface); /* solid white — no translucent bg needed */
+            box-shadow: 0 8px 30px rgba(79, 70, 229, .09);
+            contain: paint;
         }
 
         .lp-section {
@@ -935,6 +946,7 @@
         .lp-hero h1 span {
             background: linear-gradient(135deg, var(--accent), var(--accent2));
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
@@ -969,7 +981,7 @@
             border: 1px solid var(--border);
             border-radius: 16px;
             padding: 16px;
-            box-shadow: 0 10px 28px rgba(79, 70, 229, .08);
+            box-shadow: 0 2px 12px rgba(79, 70, 229, .06);
             transition: transform .2s;
         }
 
@@ -1000,7 +1012,7 @@
             border: 1px solid var(--border);
             border-radius: 18px;
             padding: 14px;
-            box-shadow: 0 18px 44px rgba(79, 70, 229, .12);
+            box-shadow: 0 6px 22px rgba(79, 70, 229, .09);
         }
 
         .lp-mock-row {
@@ -1037,23 +1049,27 @@
             margin: 0 auto;
         }
 
-        body::before {
-            opacity: .015;
-        }
-
+        /* Main app container — solid bg, GPU-composited */
         .app {
             margin: 22px;
             min-height: calc(100vh - 44px);
             border: 1px solid var(--border);
             border-radius: 24px;
             overflow: hidden;
-            box-shadow: 0 26px 60px rgba(79, 70, 229, .12);
-            background: rgba(255, 255, 255, .75);
-            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(79, 70, 229, .09);
+            background: var(--surface); /* solid — no backdrop-filter */
+            /* NO backdrop-filter: blur — was the main scroll-jank culprit */
+            contain: paint;
+        }
+
+        /* Promote scrollable areas to GPU layers */
+        .main-stage,
+        .sidebar {
+            will-change: transform;
         }
 
         header {
-            background: rgba(255, 255, 255, .88);
+            background: #ffffff;
         }
 
         .logo-text h1 {
@@ -1063,7 +1079,7 @@
         }
 
         .sidebar {
-            background: rgba(255, 255, 255, .76);
+            background: #fafbff; /* solid; was semi-transparent inside blurred container */
         }
 
         .user-card,
@@ -1092,7 +1108,7 @@
             transform: translateY(-2px);
             border-color: rgba(79, 70, 229, .35);
             color: var(--accent);
-            box-shadow: 0 12px 28px rgba(79, 70, 229, .12);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, .10);
         }
 
         .mic-btn {
@@ -1109,17 +1125,19 @@
         }
 
         footer {
-            background: rgba(255, 255, 255, .88);
+            background: #ffffff;
         }
 
+        /* Login overlay — opaque enough background; no blur needed */
         #loginOverlay {
-            background: rgba(36, 46, 94, .2);
+            background: rgba(36, 46, 94, .88);
+            /* backdrop-filter removed from base styles below too */
         }
 
         .login-btn {
             color: #fff;
             background: linear-gradient(135deg, var(--accent), var(--accent2));
-            box-shadow: 0 16px 36px rgba(79, 70, 229, .24);
+            box-shadow: 0 6px 18px rgba(79, 70, 229, .20);
         }
 
         .login-field input {
@@ -1148,8 +1166,7 @@
 </head>
 
 <body>
-    <div class="blob blob-1"></div>
-    <div class="blob blob-2"></div>
+    <!-- blob divs removed: filter:blur on animated elements caused per-frame GPU repaint jitter -->
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- LOGIN OVERLAY -->

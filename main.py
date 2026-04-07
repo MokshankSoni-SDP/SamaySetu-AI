@@ -514,7 +514,7 @@ async def voice_preview(req: VoicePreviewRequest, session=Depends(_check_admin_t
 
         sample_texts = {
             "en-IN": "Hello, welcome to our clinic. How can I assist you today?",
-            "hi-IN": "नमस्ते, हमारे क्लिनिक में आपका स्वागत है। मैं आपकी कैसे मदद कर सकता हूँ?",
+            "hi-IN": "नमस्ते, हमारे क्लिनिक में आपका स्वागत है। मैं आपकी कैसे मदद कर सकती हूँ?",
             "gu-IN": "નમસ્તે, અમારા ક્લિનિકમાં તમારું સ્વાગત છે. હું તમારી કેવી રીતે મદદ કરી શકું?"
         }
 

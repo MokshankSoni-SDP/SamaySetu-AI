@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -2183,11 +2183,22 @@
 
     .live-chat-send-btn:hover { opacity: .85; }
     .live-chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
-    /* Premium SaaS Theme Layer */
+    /* ── Premium SaaS Theme Layer (performance-optimised) ──────────────────
+     *  Key changes vs original Codex version:
+     *  1. body radial-gradients moved to body::before with position:fixed
+     *     so they are on a separate composited layer and NEVER repaint on scroll.
+     *  2. backdrop-filter removed from .layout (full-window blur = catastrophic
+     *     repaint cost every scroll frame).
+     *  3. backdrop-filter removed from #adminLogin (background is already
+     *     nearly opaque; blur was invisible and costly).
+     *  4. .layout gets contain:paint so browser limits repaint to that box.
+     *  5. .content-area gets will-change:transform to promote to GPU layer.
+     *  6. Heavy box-shadows tightened (spread reduced, opacity lowered).
+     * ─────────────────────────────────────────────────────────────────────── */
     :root {
       --bg: #f5f7ff;
-      --surface: rgba(255, 255, 255, .86);
-      --panel: #ffffff;
+      --surface: #ffffff;
+      --panel: #f8f9ff;
       --border: rgba(79, 70, 229, .14);
       --accent: #4f46e5;
       --accent2: #7c3aed;
@@ -2198,10 +2209,31 @@
       --font-body: 'DM Sans', sans-serif;
     }
 
+    /* Fixed pseudo-element background — zero repaint cost during scroll */
     body {
-      background: radial-gradient(circle at 8% 8%, rgba(79, 70, 229, .08), transparent 24%),
-        radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 28%),
-        var(--bg);
+      background: var(--bg);
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        radial-gradient(circle at 8% 8%, rgba(79, 70, 229, .08), transparent 24%),
+        radial-gradient(circle at 88% 18%, rgba(6, 182, 212, .08), transparent 28%);
+      /* Promote to its own compositing layer so the GPU handles it */
+      will-change: transform;
+    }
+
+    /* Ensure stacking order: body::before is behind everything */
+    .toast-container,
+    #adminLogin,
+    .layout {
+      position: relative;
+      z-index: 1;
     }
 
     .layout {
@@ -2210,9 +2242,17 @@
       border-radius: 24px;
       overflow: hidden;
       border: 1px solid var(--border);
-      box-shadow: 0 24px 62px rgba(79, 70, 229, .13);
-      background: rgba(255, 255, 255, .72);
-      backdrop-filter: blur(12px);
+      /* Tightened shadow: smaller spread + lower opacity */
+      box-shadow: 0 8px 32px rgba(79, 70, 229, .09);
+      background: var(--surface);
+      /* NO backdrop-filter — was the main scroll-jank culprit */
+      /* contain:paint isolates repaint to this element only */
+      contain: paint;
+    }
+
+    /* Promote the scrollable area to its own GPU layer */
+    .content-area {
+      will-change: transform;
     }
 
     .sidebar-nav,
@@ -2241,7 +2281,8 @@
       color: #fff;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
       border: none;
-      box-shadow: 0 12px 28px rgba(79, 70, 229, .22);
+      /* Reduced shadow spread/opacity */
+      box-shadow: 0 4px 14px rgba(79, 70, 229, .18);
     }
 
     .btn-primary:hover,
@@ -2265,12 +2306,14 @@
     .section-card,
     .stat-card,
     .card {
-      box-shadow: 0 10px 28px rgba(79, 70, 229, .08);
+      /* Tightened shadow */
+      box-shadow: 0 2px 12px rgba(79, 70, 229, .06);
     }
 
+    /* Login overlay — solid enough background, no blur needed */
     #adminLogin {
-      background: rgba(37, 45, 93, .24);
-      backdrop-filter: blur(10px);
+      background: rgba(37, 45, 93, .88);
+      /* backdrop-filter removed — was causing extra repaint layer */
     }
 
     .login-logo-mark,
@@ -2282,13 +2325,13 @@
     .login-btn {
       color: #fff;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
-      box-shadow: 0 18px 34px rgba(79, 70, 229, .24);
+      box-shadow: 0 6px 18px rgba(79, 70, 229, .20);
     }
 
     .toast {
       background: #fff;
       border-color: var(--border);
-      box-shadow: 0 10px 28px rgba(79, 70, 229, .12);
+      box-shadow: 0 4px 16px rgba(79, 70, 229, .10);
     }
 
     @media (max-width: 1100px) {
