@@ -751,8 +751,18 @@ async def run_brain(
     phone_number = session_data.get("phone_number")
     bot_config   = session_data.get("bot_config") or {}
     tts_speaker  = bot_config.get("tts_speaker", "simran")
-    tts_lang     = bot_config.get("language_code", "gu-IN")
     tenant_id    = session_data.get("tenant_id")
+    # ── Use the already-confirmed language preference from memory if set ──────
+    # This ensures tts_lang is 'en-IN'/'hi-IN' on EVERY turn after the user chose it,
+    # not just the turn they first said it. bot_config.language_code is the DB default;
+    # memory.language_preference is the user's live choice and always wins.
+    _mem_lang_pref = session_data.get("memory", {}).get("language_preference")
+    if _mem_lang_pref:
+        tts_lang    = _mem_lang_pref
+        tts_speaker = bot_config.get("tts_speaker", "simran")
+    else:
+        tts_lang    = bot_config.get("language_code", "gu-IN")
+    log("[LANG_ACTIVE]", f"tts_lang={tts_lang} (mem_pref={_mem_lang_pref}, db_default={bot_config.get('language_code','gu-IN')})")
 
     # ── Resolve enabled modules (cached in session, DB-fetched once) ──────────
     enabled_modules = session_data.get("enabled_modules")
@@ -781,27 +791,33 @@ async def run_brain(
 
     llm_with_tools, active_tools = llm_result
 
+    # ── Pure-Python language switch (<1 ms, zero LLM cost) ───────────────────
+    # Run BEFORE memory merge so that the detected language is authoritative and
+    # is not accidentally overwritten by whatever the small LLM extracted.
+    _SPEAKER_MAP = {"gu-IN": "simran", "hi-IN": "simran", "en-IN": "simran"}
+    requested_lang = detect_requested_language(user_text)
+
     # Merge + save memory
     prev_lang_pref = memory.get("language_preference")
     updated_memory = merge_memory(memory, new_memory_result)
-    # Do not trust extracted language_preference unless explicitly requested this turn.
-    updated_memory["language_preference"] = prev_lang_pref
+
+    # Language preference: explicit detection this turn always wins.
+    # If nothing was detected this turn, keep whatever was already confirmed
+    # (prev_lang_pref). Only fall back to None if we have nothing at all.
+    if requested_lang:
+        # Explicit request this turn — lock it in
+        updated_memory["language_preference"] = requested_lang
+        session_data["language_prompt_asked"] = True
+    else:
+        # No explicit switch this turn — preserve the previously confirmed preference.
+        # This prevents the small LLM from accidentally clearing it.
+        updated_memory["language_preference"] = prev_lang_pref
+
     print(updated_memory)
     session_data["memory"] = updated_memory
 
     log("[MEMORY]", f"Updated: {updated_memory}")
 
-    # ── Pure-Python language switch (<1 ms, zero LLM cost) ───────────────────
-    # Checks the user's message for an explicit language request (e.g. "Hindi",
-    # "speak in Gujarati", "English please").  When the LLM asks the user for
-    # their preferred language at the start of the conversation the user's one-
-    # word / short answer is enough to trigger this.
-    _SPEAKER_MAP = {"gu-IN": "simran", "hi-IN": "simran", "en-IN": "simran"}
-    requested_lang = detect_requested_language(user_text)
-    if requested_lang:
-        updated_memory["language_preference"] = requested_lang
-        session_data["memory"] = updated_memory
-        session_data["language_prompt_asked"] = True
     if requested_lang and requested_lang != tts_lang:
         log("[LANG_SWITCH]", f"Language switched: {tts_lang} → {requested_lang}")
         tts_lang    = requested_lang
@@ -814,6 +830,10 @@ async def run_brain(
         if lang_evt is not None:
             lang_evt.set()
             log("[LANG_SWITCH]", f"language_switch_event SET → STT will reconnect as {tts_lang}")
+    elif prev_lang_pref and prev_lang_pref != tts_lang:
+        # Language was already locked from a prior turn; make tts_lang consistent
+        tts_lang    = prev_lang_pref
+        tts_speaker = _SPEAKER_MAP.get(prev_lang_pref, tts_speaker)
 
 
     # ── Inject tenant context into module tools ───────────────────────────────

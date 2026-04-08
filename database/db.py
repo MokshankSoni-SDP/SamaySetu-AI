@@ -20,7 +20,7 @@ from psycopg2.extras import RealDictCursor
 # ── Database URL ─────────────────────────────────────────────────────────────
 # Replace with your actual PostgreSQL credentials, or set DATABASE_URL env var.
 DATABASE_URL = os.getenv("DATABASE_URL")
-
+CA_CERT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ca.pem")
 
 def get_db_connection():
     """
@@ -36,7 +36,14 @@ def get_db_connection():
             conn.close()
     """
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        connect_kwargs = {"cursor_factory": RealDictCursor}
+        
+        # Configure SSL for Aiven PostgreSQL if ca.pem exists
+        if os.path.exists(CA_CERT_PATH) and DATABASE_URL and "aivencloud" in DATABASE_URL:
+            connect_kwargs["sslmode"] = "verify-ca"
+            connect_kwargs["sslrootcert"] = CA_CERT_PATH
+            
+        conn = psycopg2.connect(DATABASE_URL, **connect_kwargs)
         return conn
     except psycopg2.OperationalError as e:
         raise ConnectionError(

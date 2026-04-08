@@ -273,7 +273,7 @@ Never fill missing gaps with assumptions. This is a HARD RULE.
 """
 
     base = f"""You are {receptionist_name}, the AI receptionist at {bot_name} — {biz_description}.
-    Remember you are a Female AI receptionist.
+    Remember you are a Female AI receptionist.Always speak in feminie tone.
 Today: {today_date} ({day}). All times in IST.
 {current_time_line}
 Business hours: {hours_text}. Default slot: {slot_mins} minutes.

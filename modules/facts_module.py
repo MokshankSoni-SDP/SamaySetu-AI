@@ -67,18 +67,28 @@ def _bootstrap():
 
     # ── Qdrant client ─────────────────────────────────────────────────────────
     try:
+        import os
         from qdrant_client import QdrantClient
-        _qdrant_client = QdrantClient(path=QDRANT_PATH)
+        
+        qdrant_url = os.getenv("QDRANT_URL")
+        qdrant_api_key = os.getenv("QDRANT_API_KEY")
+        
+        if qdrant_url and qdrant_api_key:
+            _qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+            print(f"[FACTS] ✓ Qdrant initialised (Cloud/Remote: {qdrant_url})")
+        else:
+            _qdrant_client = QdrantClient(path=QDRANT_PATH)
+            print(f"[FACTS] ✓ Qdrant initialised (Local path={QDRANT_PATH})")
+            
         _ensure_collection(_qdrant_client)
-        print(f"[FACTS] ✓ Qdrant initialised (path={QDRANT_PATH})")
     except Exception as e:
         print(f"[FACTS] ✗ Qdrant init FAILED: {e}  "
               "(install qdrant-client — FACTS_MODULE will be unavailable)")
 
 
 def _ensure_collection(client):
-    """Create the Qdrant collection if it doesn't exist yet."""
-    from qdrant_client.models import Distance, VectorParams
+    """Create the Qdrant collection and required payload indexes if they don't exist yet."""
+    from qdrant_client.models import Distance, VectorParams, PayloadSchemaType
     existing = [c.name for c in client.get_collections().collections]
     if COLLECTION_NAME not in existing:
         client.create_collection(
@@ -86,6 +96,19 @@ def _ensure_collection(client):
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
         print(f"[FACTS] Created Qdrant collection '{COLLECTION_NAME}'")
+
+    # Qdrant Cloud (remote) REQUIRES a payload index on any field used in filters.
+    # This is a no-op if the index already exists, so it's safe to call every startup.
+    try:
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="tenant_id",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        print(f"[FACTS] ✓ Payload index ensured for 'tenant_id'")
+    except Exception as e:
+        # Index likely already exists — safe to ignore
+        print(f"[FACTS] Payload index note: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
