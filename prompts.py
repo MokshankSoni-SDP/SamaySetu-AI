@@ -10,6 +10,7 @@ LANG_PACK = {
         "tomorrow_word": "કાલે",
         "day_after_tomorrow_word": "પરમ",
         "service_unavailable": "માફ કરશો, આ સેવા અત્યારે ઉપલબ્ધ નથી.",
+        "unnecessary_questions":"માફ કરશો, હું માત્ર ક્લિનિક સંબંધિત માહિતી આપી શકું છું. કૃપા કરીને જણાવો કે તમને અપોઇન્ટમેન્ટ કે સેવા વિશે શું મદદ જોઈએ છે?",
     },
     "hi-IN": {
         "language_name": "Hindi",
@@ -20,6 +21,7 @@ LANG_PACK = {
         "tomorrow_word": "कल",
         "day_after_tomorrow_word": "परसों",
         "service_unavailable": "माफ़ कीजिए, यह सेवा अभी उपलब्ध नहीं है।",
+        "unnecessary_questions":"माफ़ कीजिए, मैं केवल क्लिनिक से जुड़े सवालों में मदद कर सकती हूँ।",
     },
     "en-IN": {
         "language_name": "English",
@@ -30,6 +32,7 @@ LANG_PACK = {
         "tomorrow_word": "tomorrow",
         "day_after_tomorrow_word": "day after tomorrow",
         "service_unavailable": "Sorry, this service is not available right now.",
+        "unnecessary_questions":"Sorry, I can only assist with clinic-related queries. How can I help you with appointments or services?",
     }
 }
 
@@ -228,6 +231,7 @@ def get_system_prompt(
     today_word              = lang_pack["today_word"]
     tomorrow_word           = lang_pack["tomorrow_word"]
     day_after_tomorrow_word = lang_pack["day_after_tomorrow_word"]
+    unnecessary_questions = lang_pack["unnecessary_questions"]
 
     lang_map = {
         "gu-IN": "polite, natural Gujarati",
@@ -314,6 +318,27 @@ Use this memory carefully:
 7. AFTER SUCCESS: Once booking/cancel/reschedule is completed, DO NOT reuse old memory
 8. NEVER EXPOSE MEMORY: Use it silently for reasoning only
 9. If pending_action is "waiting_for_confirmation" → first ask the user for confirmation.
+
+=== STRICT DOMAIN LIMIT (CRITICAL RULE) ===
+
+You are ONLY a receptionist for this business.Keep conversations short and to the point.
+
+You MUST ONLY handle below one if their respective tool is available:
+- Appointment booking / cancel / reschedule
+- Business-related questions (fees, timings, services, location, doctor info)
+
+If user asks ANYTHING unrelated (general knowledge, festivals, politics, random chat):
+
+→ DO NOT answer the question
+→ DO NOT explain anything
+→ DO NOT call any tools
+
+Instead respond politely and redirect:
+
+Examples:
+- "{unnecessary_questions}"
+
+This is a HARD RULE. No exceptions.
 
 {knowledge_boundary_section}
 === CONVERSATION ===

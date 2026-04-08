@@ -1253,13 +1253,21 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
             lang_switch_reconnect = False  # tracks if this reconnect was triggered by language switch
 
             if reconnect_num == 0:
-                for _ in range(15):
+                # Wait up to 5 s for bot_config to arrive via the async "init" message.
+                # The DB fetch happens in browser_to_sarvam() after the frontend sends "init",
+                # which can take 2-3 s — previously only 1.5 s was waited, causing a race.
+                for _ in range(50):
                     if chat_sessions.get(session_id, {}).get("bot_config"):
                         break
                     await asyncio.sleep(0.1)
 
-            bot_cfg  = chat_sessions.get(session_id, {}).get("bot_config") or {}
-            stt_lang = bot_cfg.get("language_code", "gu-IN")
+            sess     = chat_sessions.get(session_id, {})
+            bot_cfg  = sess.get("bot_config") or {}
+            # Priority: user's live choice (memory) > DB default > hardcoded fallback.
+            # This ensures that after a language-switch reconnect the new STT language
+            # is picked up immediately without requiring another reconnect.
+            mem_lang_pref = sess.get("memory", {}).get("language_preference")
+            stt_lang = mem_lang_pref or bot_cfg.get("language_code", "gu-IN")
 
             log("[STT_SEND]", f"Opening Sarvam STT ({attempt_label}) lang={stt_lang}")
             try:

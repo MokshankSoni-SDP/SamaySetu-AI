@@ -282,15 +282,21 @@ _LANG_NAMES = {
 }
 
 _REQUEST_VERBS = [
-    # Gujarati script
+    # Gujarati script — request/want verbs
     "વાત કરી શકો", "વાત કરી શકશો", "વાત કરો", "બોલો", "બોલી શકો",
+    # Gujarati-script Hindi hybrid (user writes Gujarati but means Hindi preference)
+    # e.g. "મેં હિન્દી પર વાત કરના ચાહુંગા" / "हिंदी में बात करना चाहूंगा"
+    "વાત કરના", "કરના ચાહ", "ચાહુંગા", "ચાહીસ",
+    # Devanagari variants
+    "बात करना", "बोलना", "चाहूंगा", "चाहता", "चाहती",
     # Romanised / Hindi
     "baat karo", "baat kar", "boliye", "bolna", "bolo", "bolsho",
-    "bol sak", "baat kar sak",
+    "bol sak", "baat kar sak", "chahta", "chahti", "chahiye",
+    "mein baat", "par baat", "mai baat",
     # English
     "speak", "talk", "switch to", "change to",
     "in english", "in gujarati", "in hindi",
-    "prefer", "language",
+    "prefer", "language", "want to speak", "would like",
 ]
 
 
