@@ -640,6 +640,81 @@
             display: none;
         }
 
+        /* —— Calendar prompt overlay —— */
+        #calendarOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 12, 16, .78);
+            z-index: 1100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fade-in .2s ease;
+        }
+
+        #calendarOverlay.hidden {
+            display: none;
+        }
+
+        .calendar-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 26px 24px;
+            width: 520px;
+            max-width: 92vw;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, .6), 0 0 60px rgba(245, 166, 35, .06);
+        }
+
+        .calendar-card h3 {
+            font-family: var(--font-display);
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+
+        .calendar-card p {
+            font-size: 14px;
+            color: var(--text);
+            line-height: 1.55;
+        }
+
+        .calendar-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .calendar-btn {
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: transform .15s, border-color .2s, box-shadow .2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .calendar-btn.primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #0a0c10;
+            border: none;
+            font-weight: 700;
+        }
+
+        .calendar-btn:hover {
+            transform: translateY(-1px);
+            border-color: rgba(245, 166, 35, .45);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, .25);
+        }
+
         @keyframes fade-in {
             from {
                 opacity: 0;
@@ -1201,6 +1276,19 @@
     </div>
 
 
+    <!-- CALENDAR PROMPT OVERLAY -->
+    <div id="calendarOverlay" class="hidden" onclick="closeCalendarOverlay()">
+        <div class="calendar-card" onclick="event.stopPropagation()">
+            <h3>Appointment booked</h3>
+            <p id="calendarPromptText">Would you like me to add it to your calendar?</p>
+            <div class="calendar-actions">
+                <a class="calendar-btn primary" id="calendarAddBtn" href="#" target="_blank"
+                    rel="noopener noreferrer">Add to Google Calendar</a>
+                <button class="calendar-btn" onclick="closeCalendarOverlay()">Not now</button>
+            </div>
+        </div>
+    </div>
+
 
     <div class="app-shell" id="voiceWorkspace">
         <div class="app">
@@ -1697,6 +1785,23 @@
         function closeLoginOverlay() {
             document.getElementById('loginOverlay').classList.add('hidden');
         }
+        function openCalendarOverlay(payload) {
+            try {
+                const msg = payload.message || "I've booked your appointment. Would you like me to add it to your calendar?";
+                const start = payload.start_time ? ` (${payload.start_time}` : '';
+                const end = payload.end_time ? ` - ${payload.end_time})` : (start ? ')' : '');
+                document.getElementById('calendarPromptText').textContent = msg + (start ? (start + end) : '');
+                const link = payload.calendar_link || payload.link || '#';
+                const btn = document.getElementById('calendarAddBtn');
+                btn.setAttribute('href', link);
+                // UX: close the overlay as soon as user clicks "Add to Google Calendar"
+                btn.onclick = () => { closeCalendarOverlay(); showToast('Opening Google Calendar…', 'info'); return true; };
+                document.getElementById('calendarOverlay').classList.remove('hidden');
+            } catch (e) { }
+        }
+        function closeCalendarOverlay() {
+            document.getElementById('calendarOverlay').classList.add('hidden');
+        }
         function addMessage(role, text) {
             const d = document.createElement('div');
             d.className = 'msg ' + role;
@@ -1808,6 +1913,7 @@
                     }
                 }
                 if (data.type === 'ai_text') addMessage('ai', data.text);
+                if (data.type === 'calendar_prompt') openCalendarOverlay(data);
                 if (data.type === 'processing_start') setStatus('Processing...', true);
                 if (data.type === 'ai_speaking_start') {
                     currentResponseId++;
@@ -1828,7 +1934,11 @@
                 if (data.type === 'stt_ready' && data.reconnect_num > 0) showToast('STT reconnected ✓', 'success');
                 if (data.type === 'stt_failed') { setStatus('STT failed — refresh page', false); showToast('Voice recognition failed.', 'error'); }
                 if (data.type === 'tool_call' && data.status === 'ok') {
-                    if (data.name === 'book_appointment' && data.result && data.result.includes('SUCCESS')) {
+                    const bookedOk = (
+                        data.name === 'book_appointment' &&
+                        ((data.result_obj && data.result_obj.status === 'SUCCESS') || (data.result && data.result.includes('SUCCESS')))
+                    );
+                    if (bookedOk) {
                         setTimeout(loadAppointments, 2000);
                     }
                 }

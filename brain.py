@@ -1,17 +1,5 @@
 """
 brain.py
---------
-Core AI reasoning engine for SamaySetu AI.
-Handles memory extraction, dynamic tool loading, LLM invocation, and TTS dispatch.
-
-LATENCY OPTIMISATIONS APPLIED:
-  FIX 4 — Prompt size kept in check via max_history trim.
-  FIX 5 — Memory extraction and module loading are PARALLELISED with asyncio.gather().
-           Both run simultaneously instead of sequentially, saving the memory-LLM
-           round-trip time for every request.
-  FIX 6 — LLM with tools is built once per (tenant, module-set) combo and cached via
-           module_registry._tools_cache.  The cached tool list is reused directly
-           so bind_tools() is not called on every request.
 """
 
 import re
@@ -544,6 +532,11 @@ def is_tool_output(text: str) -> bool:
 def clean_for_tts(text: str) -> str:
     text = _TOOL_BLOCK_RE.sub("", text)
     text = re.sub(r'\{[^}]{0,500}\}', "", text)
+    # Strip HTML (UI may render links/buttons, but TTS should not read markup)
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Strip URLs so TTS doesn't spell long links
+    text = re.sub(r"https?://\\S+", " ", text)
+    text = re.sub(r"\\s{2,}", " ", text)
     return text.strip()
 
 
@@ -970,7 +963,12 @@ async def run_brain(
 
             try:
                 obs = await _run_tool_async(tname, targs)
-                obs_text = str(obs)
+                obs_obj = None
+                if isinstance(obs, (dict, list)):
+                    obs_text = json.dumps(obs, ensure_ascii=False)
+                    obs_obj = obs
+                else:
+                    obs_text = str(obs)
                 if (
                     tname == "check_calendar_availability"
                     and "We only accept appointments during these business hours" in obs_text
@@ -979,7 +977,28 @@ async def run_brain(
                         "error_text": obs_text,
                         "requested_start": targs.get("start_time_str"),
                     }
-                if "success" in str(obs).lower():
+                # Special UX: after successful booking, send an "Add to Calendar" prompt to UI.
+                if (
+                    tname == "book_appointment"
+                    and isinstance(obs, dict)
+                    and obs.get("status") == "SUCCESS"
+                    and obs.get("calendar_link")
+                ):
+                    await websocket.send_json({
+                        "type": "calendar_prompt",
+                        "status": "SUCCESS",
+                        "message": obs.get("message") or "Appointment booked successfully.",
+                        "calendar_link": obs.get("calendar_link"),
+                        "start_time": obs.get("start_time"),
+                        "end_time": obs.get("end_time"),
+                    })
+                    link = obs.get("calendar_link")
+                    session_data["_force_reply"] = (
+                        "I've booked your appointment successfully.<br><br>"
+                        "Would you like to add it to your calendar?<br><br>"
+                    )
+
+                if "success" in obs_text.lower():
                     print("$$$state memory cleared after success$$$")
                     lang_pref = session_data.get("memory", {}).get("language_preference")
                     session_data["memory"] = {
@@ -997,17 +1016,31 @@ async def run_brain(
                 log("[TOOL]", f"'{tname}' OK in {(datetime.now()-t_tool).total_seconds():.2f}s")
             except Exception as e:
                 obs, status = f"Error: {e}", "error"
+                obs_text = str(obs)
+                obs_obj = None
                 log("[TOOL]", f"'{tname}' FAILED: {e}")
 
-            await websocket.send_json({
-                "type": "tool_call", "name": tname, "args": targs,
-                "status": status, "result": str(obs)
-            })
-            return ToolMessage(content=str(obs), tool_call_id=tool_call["id"])
+            payload = {
+                "type": "tool_call",
+                "name": tname,
+                "args": targs,
+                "status": status,
+                "result": obs_text,
+            }
+            if obs_obj is not None:
+                payload["result_obj"] = obs_obj
+
+            await websocket.send_json(payload)
+            return ToolMessage(content=obs_text, tool_call_id=tool_call["id"])
 
         tool_results   = await asyncio.gather(*[execute_tool(tc) for tc in ai_msg.tool_calls])
         history.extend(tool_results)
         recent_history = [history[0]] + history[-max_history:]
+
+        forced_reply = session_data.pop("_force_reply", None)
+        if forced_reply:
+            ai_msg = AIMessage(content=forced_reply)
+            break
 
         out_of_hours = session_data.pop("_out_of_hours_error", None)
         if out_of_hours:

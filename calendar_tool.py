@@ -14,6 +14,7 @@ active WebSocket session context and fetches the correct calendar client.
 import datetime
 import os
 import pytz
+import urllib.parse
 from typing import Optional
 from dotenv import load_dotenv
 import config
@@ -94,6 +95,39 @@ def _try_db(fn, *args, **kwargs):
 
 
 IST = pytz.timezone(config.CALENDAR_TIMEZONE)
+
+
+def generate_google_calendar_link(
+    summary: str,
+    description: str,
+    location: str,
+    start_dt: datetime.datetime,
+    end_dt: datetime.datetime,
+) -> str:
+    """
+    Generates a Google Calendar "TEMPLATE" link from datetime objects.
+
+    Note: Google expects UTC timestamps in YYYYMMDDTHHMMSSZ format.
+    """
+    if start_dt.tzinfo is None:
+        start_dt = IST.localize(start_dt)
+    if end_dt.tzinfo is None:
+        end_dt = IST.localize(end_dt)
+
+    start_utc = start_dt.astimezone(datetime.timezone.utc)
+    end_utc = end_dt.astimezone(datetime.timezone.utc)
+
+    start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
+
+    base_url = "https://calendar.google.com/calendar/render?action=TEMPLATE"
+    params = {
+        "text": summary or "",
+        "details": description or "",
+        "location": location or "",
+        "dates": f"{start_str}/{end_str}",
+    }
+    return f"{base_url}&{urllib.parse.urlencode(params)}"
 
 
 def is_past_time(start_time_str: str) -> bool:
@@ -355,6 +389,10 @@ def book_appointment(
     naive_dt = datetime.datetime.fromisoformat(start_time_str)
     end_dt = naive_dt + datetime.timedelta(minutes=duration_minutes)
 
+    # Build calendar-link datetimes (timezone-aware, in tenant timezone)
+    start_local = IST.localize(naive_dt) if naive_dt.tzinfo is None else naive_dt.astimezone(IST)
+    end_local = IST.localize(end_dt) if end_dt.tzinfo is None else end_dt.astimezone(IST)
+
     event = {
         "summary": display_summary,
         "description": "Booked via SamaySetu Gujarati AI Bot",
@@ -382,7 +420,22 @@ def book_appointment(
         )
         print(f"[TENANT] book_appointment: tenant_id={tenant_id} phone={phone_number}")
 
-    return "SUCCESS: Appointment booked."
+    # Generate "Add to Google Calendar" link for the end-user (dynamic dates)
+    calendar_link = generate_google_calendar_link(
+        summary=display_summary,
+        description="Booked via SamaySetu Gujarati AI Bot",
+        location=bot_cfg.get("location", "Clinic / Shop Visit"),
+        start_dt=start_local,
+        end_dt=end_local,
+    )
+
+    return {
+        "status": "SUCCESS",
+        "message": "Appointment booked successfully.",
+        "calendar_link": calendar_link,
+        "start_time": naive_dt.strftime("%Y-%m-%d %H:%M"),
+        "end_time": end_dt.strftime("%Y-%m-%d %H:%M"),
+    }
 
 
 # ── Tool: cancel_appointment ──────────────────────────────────────────────────
