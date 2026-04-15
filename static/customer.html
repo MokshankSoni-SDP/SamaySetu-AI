@@ -2057,20 +2057,12 @@
             const initials = (name || phone).charAt(0).toUpperCase();
             document.getElementById('userAvatar').textContent = initials;
         }
-        async function checkLoginStatus() {
-            const phone = localStorage.getItem('phone_number');
-            const name = localStorage.getItem('user_name');
-            if (!phone) { document.getElementById('loginOverlay').classList.remove('hidden'); return; }
-            try {
-                await fetch('/user/login', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone_number: phone, name: name || null, tenant_id: TENANT_ID })
-                });
-            } catch (e) { }
-            loggedInUserPhone = phone;
-            renderUserBadge(phone, name);
-            document.getElementById('loginOverlay').classList.add('hidden');
-            startAppointmentRefresh();
+        function checkLoginStatus() {
+            // Always show the login screen on every fresh page load.
+            // Clear any stale session data so a previous user never auto-logs into a new visitor's session.
+            localStorage.removeItem('phone_number');
+            localStorage.removeItem('user_name');
+            document.getElementById('loginOverlay').classList.remove('hidden');
         }
 
         function resetSession() {
