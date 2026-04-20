@@ -1101,10 +1101,15 @@ async def voice_ws(websocket: WebSocket, phone_number: Optional[str] = None):
         "memory": {
             "intent": None,
             "language_preference": None,
-            "pending_action": "waiting_for_confirmation",
+            "pending_action": "none",
             "appointment": {"date": None, "time": None, "duration": None},
             "reschedule": {"old_time": None, "new_time": None},
             "date_context": {"resolved_date": None, "source": "none"},
+        },
+        "confirmation_state": {
+            "status": "idle",
+            "action": None,
+            "payload": None,
         },
         "language_prompt_asked": False,
         "language_switch_event": language_switch_event,   # brain signals this directly

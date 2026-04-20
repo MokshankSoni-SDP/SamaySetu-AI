@@ -354,6 +354,212 @@ def _infer_lang_from_text(text: str) -> Optional[str]:
     return None
 
 
+_MUTATING_TOOLS = {"book_appointment", "cancel_appointment", "reschedule_appointment"}
+
+
+def _is_mutating_tool(tool_name: str) -> bool:
+    return tool_name in _MUTATING_TOOLS
+
+
+def _confirmation_state_default() -> dict:
+    return {
+        "status": "idle",  # idle | awaiting_confirmation | confirmed
+        "action": None,    # book | cancel | reschedule
+        "payload": None,   # canonical action payload snapshot
+    }
+
+
+def _normalize_hhmm(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    s = str(value).strip()
+    if re.fullmatch(r"\d{2}:\d{2}:\d{2}", s):
+        return s[:5]
+    if re.fullmatch(r"\d{2}:\d{2}", s):
+        return s
+    return None
+
+
+def _build_action_payload_from_memory(memory: dict) -> Optional[dict]:
+    intent = (memory or {}).get("intent")
+    appt = (memory or {}).get("appointment") or {}
+    res = (memory or {}).get("reschedule") or {}
+
+    if intent == "book":
+        date = appt.get("date")
+        hhmm = _normalize_hhmm(appt.get("time"))
+        if not date or not hhmm:
+            return None
+        payload = {"start_time_str": f"{date}T{hhmm}:00"}
+        if appt.get("duration"):
+            try:
+                payload["duration_minutes"] = int(appt["duration"])
+            except Exception:
+                pass
+        return {"action": "book", "payload": payload}
+
+    if intent == "cancel":
+        date = appt.get("date")
+        hhmm = _normalize_hhmm(appt.get("time"))
+        if not date or not hhmm:
+            return None
+        return {"action": "cancel", "payload": {"start_time_str": f"{date}T{hhmm}:00"}}
+
+    if intent == "reschedule":
+        old_t = res.get("old_time")
+        new_t = res.get("new_time")
+        if not old_t or not new_t:
+            return None
+        return {
+            "action": "reschedule",
+            "payload": {
+                "old_start_time_str": str(old_t),
+                "new_start_time_str": str(new_t),
+            },
+        }
+
+    return None
+
+
+def _canonical_payload_signature(action: str, payload: dict) -> dict:
+    if action == "book":
+        return {"action": "book", "start_time_str": payload.get("start_time_str")}
+    if action == "cancel":
+        return {"action": "cancel", "start_time_str": payload.get("start_time_str")}
+    if action == "reschedule":
+        return {
+            "action": "reschedule",
+            "old_start_time_str": payload.get("old_start_time_str"),
+            "new_start_time_str": payload.get("new_start_time_str"),
+        }
+    return {"action": action}
+
+
+def _tool_call_signature(tool_name: str, args: dict) -> Optional[dict]:
+    if tool_name == "book_appointment":
+        return {"action": "book", "start_time_str": (args or {}).get("start_time_str")}
+    if tool_name == "cancel_appointment":
+        return {"action": "cancel", "start_time_str": (args or {}).get("start_time_str")}
+    if tool_name == "reschedule_appointment":
+        return {
+            "action": "reschedule",
+            "old_start_time_str": (args or {}).get("old_start_time_str"),
+            "new_start_time_str": (args or {}).get("new_start_time_str"),
+        }
+    return None
+
+
+def _payload_same(a: dict, b: dict) -> bool:
+    return json.dumps(a or {}, sort_keys=True) == json.dumps(b or {}, sort_keys=True)
+
+
+def _detect_confirmation_intent(text: str) -> Optional[str]:
+    if not text:
+        return None
+    t = re.sub(r"\s+", " ", text.lower()).strip()
+
+    no_markers = [
+        "no", "nope", "not now", "don't", "do not", "cancel it", "stop",
+        "ના", "નહી", "નહીં", "બંધ", "રોકો",
+        "नहीं", "ना", "मत", "रोकिए",
+    ]
+    yes_markers = [
+        "yes", "yeah", "yep", "ok", "okay", "confirm", "go ahead", "book it",
+        "હા", "હાં", "ઓકે", "કન્ફર્મ", "કરી દો",
+        "हाँ", "हा", "ठीक है", "कन्फर्म", "कर दो",
+    ]
+
+    if any(w in t for w in no_markers):
+        return "no"
+    if any(w in t for w in yes_markers):
+        return "yes"
+    return None
+
+
+def _fmt_dt_for_confirmation(dt_str: str) -> str:
+    try:
+        dt = datetime.fromisoformat(str(dt_str))
+        return f"{dt.strftime('%d %B %Y')} at {dt.strftime('%I:%M %p').lstrip('0')}"
+    except Exception:
+        return str(dt_str)
+
+
+def _build_confirmation_prompt(lang_code: str, action: str, payload: dict) -> str:
+    lang_code = _normalize_lang_code(lang_code)
+    if action == "book":
+        when = _fmt_dt_for_confirmation(payload.get("start_time_str"))
+        if lang_code == "gu-IN":
+            return f"કૃપા કરીને ખાતરી કરો, શું હું {when} માટે એપોઇન્ટમેન્ટ બુક કરું?"
+        if lang_code == "hi-IN":
+            return f"कृपया पुष्टि करें, क्या मैं {when} के लिए अपॉइंटमेंट बुक कर दूँ?"
+        return f"Please confirm: should I book the appointment for {when}?"
+
+    if action == "cancel":
+        when = _fmt_dt_for_confirmation(payload.get("start_time_str"))
+        if lang_code == "gu-IN":
+            return f"કૃપા કરીને ખાતરી કરો, શું હું {when} ની એપોઇન્ટમેન્ટ રદ કરું?"
+        if lang_code == "hi-IN":
+            return f"कृपया पुष्टि करें, क्या मैं {when} की अपॉइंटमेंट रद्द कर दूँ?"
+        return f"Please confirm: should I cancel the appointment for {when}?"
+
+    if action == "reschedule":
+        old_when = _fmt_dt_for_confirmation(payload.get("old_start_time_str"))
+        new_when = _fmt_dt_for_confirmation(payload.get("new_start_time_str"))
+        if lang_code == "gu-IN":
+            return (
+                "કૃપા કરીને ખાતરી કરો, શું હું તમારી એપોઇન્ટમેન્ટ "
+                f"{old_when} થી {new_when} પર રિશેડ્યૂલ કરું?"
+            )
+        if lang_code == "hi-IN":
+            return (
+                "कृपया पुष्टि करें, क्या मैं आपकी अपॉइंटमेंट "
+                f"{old_when} से {new_when} पर रीशेड्यूल कर दूँ?"
+            )
+        return f"Please confirm: should I reschedule your appointment from {old_when} to {new_when}?"
+
+    if lang_code == "gu-IN":
+        return "કૃપા કરીને પહેલા કન્ફર્મ કરો."
+    if lang_code == "hi-IN":
+        return "कृपया पहले पुष्टि करें।"
+    return "Please confirm first."
+
+
+def _build_decline_reply(lang_code: str, action: str) -> str:
+    lang_code = _normalize_lang_code(lang_code)
+    if lang_code == "gu-IN":
+        if action == "book":
+            return "બરાબર, હું હજુ બુક નથી કરી રહ્યો. કૃપા કરીને નવો સમય જણાવો."
+        if action == "cancel":
+            return "બરાબર, હું હજુ રદ નથી કરી રહ્યો. જો રદ કરવું હોય તો સમય જણાવો."
+        if action == "reschedule":
+            return "બરાબર, હું હજુ રિશેડ્યૂલ નથી કરી રહ્યો. કૃપા કરીને નવો સમય જણાવો."
+        return "બરાબર, હું કોઈ action કરી રહ્યો નથી."
+    if lang_code == "hi-IN":
+        if action == "book":
+            return "ठीक है, मैं अभी बुक नहीं कर रहा हूँ। कृपया नया समय बताइए।"
+        if action == "cancel":
+            return "ठीक है, मैं अभी रद्द नहीं कर रहा हूँ। अगर रद्द करना हो तो समय बताइए।"
+        if action == "reschedule":
+            return "ठीक है, मैं अभी रीशेड्यूल नहीं कर रहा हूँ। कृपया नया समय बताइए।"
+        return "ठीक है, मैं अभी कोई कार्रवाई नहीं कर रहा हूँ।"
+    if action == "book":
+        return "Okay, I will not book yet. Please tell me the time you want."
+    if action == "cancel":
+        return "Okay, I will not cancel yet. Please tell me which appointment to cancel."
+    if action == "reschedule":
+        return "Okay, I will not reschedule yet. Please share the new preferred time."
+    return "Okay, I will not take action yet."
+
+
+def _build_confirmation_blocked_reply(lang_code: str) -> str:
+    lang_code = _normalize_lang_code(lang_code)
+    if lang_code == "gu-IN":
+        return "મને પહેલા તમારી સ્પષ્ટ ખાતરી જોઈએ. કૃપા કરીને હા કહીને કન્ફર્મ કરો."
+    if lang_code == "hi-IN":
+        return "मुझे पहले आपकी स्पष्ट पुष्टि चाहिए। कृपया हाँ कहकर कन्फर्म करें।"
+    return "I need your explicit confirmation first. Please say yes to confirm."
+
+
 def _build_out_of_hours_reply(lang_code: str, req_time: Optional[str], ranges: str) -> str:
     """
     Build an out-of-hours fallback reply in the active conversation language.
@@ -729,11 +935,12 @@ async def run_brain(
             "memory": {
                 "intent": None,
                 "language_preference": None,
-                "pending_action": "waiting_for_confirmation",
+                "pending_action": "none",
                 "appointment": {"date": None, "time": None, "duration": None},
                 "reschedule": {"old_time": None, "new_time": None},
                 "date_context": {"resolved_date": None, "source": "none"},
-            }
+            },
+            "confirmation_state": _confirmation_state_default(),
         }
 
     session_data = chat_sessions[session_id]
@@ -741,10 +948,12 @@ async def run_brain(
     session_data.setdefault("memory", {})
     session_data["memory"].setdefault("intent", None)
     session_data["memory"].setdefault("language_preference", None)
-    session_data["memory"].setdefault("pending_action", "waiting_for_confirmation")
+    session_data["memory"].setdefault("pending_action", "none")
     session_data["memory"].setdefault("appointment", {"date": None, "time": None, "duration": None})
     session_data["memory"].setdefault("reschedule", {"old_time": None, "new_time": None})
     session_data["memory"].setdefault("date_context", {"resolved_date": None, "source": "none"})
+    session_data.setdefault("confirmation_state", _confirmation_state_default())
+    session_data.pop("_confirmed_action", None)
     session_data.setdefault("language_prompt_asked", False)
     history      = session_data["history"]
     phone_number = session_data.get("phone_number")
@@ -876,6 +1085,100 @@ async def run_brain(
         log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
         return
 
+    # Deterministic confirmation state machine for booking/cancel/reschedule.
+    # We do not trust LLM-only confirmation for mutating actions.
+    confirmation_state = session_data.setdefault("confirmation_state", _confirmation_state_default())
+    action_ctx = _build_action_payload_from_memory(updated_memory)
+    confirm_intent = _detect_confirmation_intent(user_text)
+    turn_lang = _normalize_lang_code(
+        updated_memory.get("language_preference") or tts_lang or "en-IN"
+    )
+    if (
+        not action_ctx
+        and confirmation_state.get("status") == "awaiting_confirmation"
+        and confirmation_state.get("action")
+        and confirmation_state.get("payload")
+        and confirm_intent in {"yes", "no"}
+    ):
+        action_ctx = {
+            "action": confirmation_state.get("action"),
+            "payload": confirmation_state.get("payload"),
+        }
+        log("[CONFIRM]", "Using pending confirmation payload from state (memory extractor provided no action context)")
+
+    if action_ctx:
+        action = action_ctx["action"]
+        payload = action_ctx["payload"]
+        signature = _canonical_payload_signature(action, payload)
+        awaiting_match = (
+            confirmation_state.get("status") == "awaiting_confirmation"
+            and confirmation_state.get("action") == action
+            and _payload_same(
+                _canonical_payload_signature(
+                    confirmation_state.get("action"),
+                    confirmation_state.get("payload") or {},
+                ),
+                signature,
+            )
+        )
+
+        if confirm_intent == "yes" and awaiting_match:
+            confirmation_state.update({
+                "status": "confirmed",
+                "action": action,
+                "payload": payload,
+            })
+            updated_memory["pending_action"] = "none"
+            session_data["_confirmed_action"] = {
+                "signature": signature,
+                "consumed": False,
+            }
+            log("[CONFIRM]", f"Confirmed by user for action={action} payload={signature}")
+        else:
+            confirmation_state.update({
+                "status": "awaiting_confirmation",
+                "action": action,
+                "payload": payload,
+            })
+            updated_memory["pending_action"] = "waiting_for_confirmation"
+            session_data["memory"] = updated_memory
+
+            if confirm_intent == "no":
+                ask_text = _build_decline_reply(turn_lang, action)
+            else:
+                ask_text = _build_confirmation_prompt(turn_lang, action, payload)
+            history.append(AIMessage(content=ask_text))
+            session_data["last_ai_text"] = ask_text
+            sentences = split_into_sentences(ask_text)
+            log("[CONFIRM]", f"Awaiting explicit confirmation for action={action}")
+            log("[BRAIN]", f"Reply: '{ask_text[:100]}' | {len(sentences)} sentence(s) [forced confirmation]")
+            await websocket.send_json({"type": "ai_text", "text": ask_text, "chunk_count": len(sentences)})
+            await websocket.send_json({"type": "ai_speaking_start"})
+            if tts_session:
+                done_evt = asyncio.Event()
+                import random as _rand
+                resp_id = _rand.randint(1, 999999)
+                await tts_session.speak(sentences, tts_speaker, turn_lang, resp_id, done_evt)
+                await done_evt.wait()
+            else:
+                for idx, sentence in enumerate(sentences):
+                    audio_b64 = await tts_convert_fn(sentence, tts_speaker, turn_lang)
+                    await websocket.send_json({
+                        "type": "audio_chunk", "index": idx, "total": len(sentences),
+                        "text": sentence, "audio": audio_b64, "is_last": idx == len(sentences) - 1
+                    })
+                await websocket.send_json({"type": "tts_done"})
+            log("[BRAIN]", f"DONE in {(datetime.now()-t0).total_seconds():.2f}s")
+            return
+    else:
+        if (
+            (updated_memory.get("intent") in {"facts", "query", "none"})
+            and confirmation_state.get("status") != "awaiting_confirmation"
+        ):
+            confirmation_state.update(_confirmation_state_default())
+
+    session_data["memory"] = updated_memory
+
     _inject_tool_context(session_id, chat_sessions, enabled_modules)
 
     # ── Build system prompt ───────────────────────────────────────────────────
@@ -953,7 +1256,32 @@ async def run_brain(
 
         async def execute_tool(tool_call):
             tname = tool_call["name"]
-            targs = tool_call["args"]
+            targs = dict(tool_call.get("args") or {})
+            if _is_mutating_tool(tname):
+                allowed = session_data.get("_confirmed_action")
+                sig = _tool_call_signature(tname, targs)
+                if (
+                    not allowed
+                    or allowed.get("consumed")
+                    or not _payload_same(sig, allowed.get("signature"))
+                ):
+                    active_lang = (
+                        session_data.get("memory", {}).get("language_preference")
+                        or tts_lang
+                        or "en-IN"
+                    )
+                    blocked_text = _build_confirmation_blocked_reply(active_lang)
+                    log("[CONFIRM_BLOCK]", f"Blocked mutating tool '{tname}' | sig={sig} allowed={allowed}")
+                    await websocket.send_json({
+                        "type": "tool_call",
+                        "name": tname,
+                        "args": targs,
+                        "status": "blocked",
+                        "result": blocked_text,
+                    })
+                    return ToolMessage(content=blocked_text, tool_call_id=tool_call["id"])
+                allowed["consumed"] = True
+                session_data["_confirmed_action"] = allowed
             if phone_number:
                 targs = {**targs, "phone_number": phone_number}
 
@@ -984,19 +1312,27 @@ async def run_brain(
                     and obs.get("status") == "SUCCESS"
                     and obs.get("calendar_link")
                 ):
+                    active_lang = session_data.get("memory", {}).get("language_preference") or tts_lang or "en-IN"
+                    if "gu" in active_lang:
+                        cal_msg = "મેં તમારી નિમણૂક સફળતાપૂર્વક બુક કરી છે. શું તમે તેને તમારા કેલેન્ડરમાં ઉમેરવા માંગો છો?"
+                        force_text = "મેં તમારી નિમણૂક સફળતાપૂર્વક બુક કરી છે.<br><br>શું તમે તેને તમારા કેલેન્ડરમાં ઉમેરવા માંગો છો?<br><br>"
+                    elif "hi" in active_lang:
+                        cal_msg = "मैंने आपकी अपॉइंटमेंट सफलतापूर्वक बुक कर ली है। क्या आप इसे अपने कैलेंडर में जोड़ना चाहेंगे?"
+                        force_text = "मैंने आपकी अपॉइंटमेंट सफलतापूर्वक बुक कर ली है।<br><br>क्या आप इसे अपने कैलेंडर में जोड़ना चाहेंगे?<br><br>"
+                    else:
+                        cal_msg = "I've booked your appointment successfully. Would you like to add it to your calendar?"
+                        force_text = "I've booked your appointment successfully.<br><br>Would you like to add it to your calendar?<br><br>"
+
                     await websocket.send_json({
                         "type": "calendar_prompt",
                         "status": "SUCCESS",
-                        "message": obs.get("message") or "Appointment booked successfully.",
+                        "message": cal_msg,
                         "calendar_link": obs.get("calendar_link"),
                         "start_time": obs.get("start_time"),
                         "end_time": obs.get("end_time"),
                     })
                     link = obs.get("calendar_link")
-                    session_data["_force_reply"] = (
-                        "I've booked your appointment successfully.<br><br>"
-                        "Would you like to add it to your calendar?<br><br>"
-                    )
+                    session_data["_force_reply"] = force_text
 
                 if "success" in obs_text.lower():
                     print("$$$state memory cleared after success$$$")
@@ -1004,11 +1340,13 @@ async def run_brain(
                     session_data["memory"] = {
                         "intent": "none",
                         "language_preference": lang_pref,
-                        "pending_action": "waiting_for_confirmation",
+                        "pending_action": "none",
                         "appointment": {"date": None, "time": None, "duration": None},
                         "reschedule": {"old_time": None, "new_time": None},
                         "date_context": {"resolved_date": None, "source": "none"}
                     }
+                    session_data["confirmation_state"] = _confirmation_state_default()
+                    session_data.pop("_confirmed_action", None)
                     # Force module re-fetch next turn in case config changed
                     session_data.pop("enabled_modules", None)
 
