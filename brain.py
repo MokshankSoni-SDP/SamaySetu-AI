@@ -37,13 +37,26 @@ if TYPE_CHECKING:
 # ── LLM clients ──────────────────────────────────────────────────────────────
 import os
 
-GROQ_SMALL_LLM_KEY = os.getenv("GROQ_SMALL_LLM")
-small_llm = ChatGroq(
-    api_key=GROQ_SMALL_LLM_KEY,
-    model="llama-3.1-8b-instant",
-    temperature=0
-)
-_main_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+def get_small_llm():
+    if config.LLM_PROVIDER == 'nvidia':
+        os.environ["NVIDIA_API_KEY"] = getattr(config, 'NVIDIA_SMALL_API_KEY', config.NVIDIA_API_KEY)
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+        return ChatNVIDIA(model=getattr(config, 'NVIDIA_SMALL_MODEL_NAME', 'meta/llama-3.1-8b-instruct'), temperature=0)
+    else:
+        GROQ_SMALL_LLM_KEY = getattr(config, 'GROQ_SMALL_API_KEY', None) or os.getenv("GROQ_SMALL_LLM")
+        small_model = getattr(config, 'GROQ_SMALL_MODEL_NAME', 'llama-3.1-8b-instant')
+        return ChatGroq(api_key=GROQ_SMALL_LLM_KEY, model=small_model, temperature=0)
+
+def get_main_llm():
+    if config.LLM_PROVIDER == 'nvidia':
+        os.environ["NVIDIA_API_KEY"] = config.NVIDIA_API_KEY
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+        return ChatNVIDIA(model=config.NVIDIA_MODEL_NAME, temperature=0.1)
+    else:
+        return ChatGroq(model=config.GROQ_MODEL_NAME, temperature=0.1)
+
+small_llm = get_small_llm()
+_main_llm = get_main_llm()
 
 max_history       = config.MAX_HISTORY
 max_tool_iterations = config.MAX_TOOL_ITERATIONS
@@ -63,7 +76,7 @@ def _get_llm_cache_key(tenant_id: str, enabled_modules: List[str]) -> str:
 def get_llm_with_tools(tenant_id: str, enabled_modules: List[str]):
     """Returns a cached (llm_with_tools, tools) pair for this tenant+modules combo."""
     key = _get_llm_cache_key(tenant_id, enabled_modules)
-    fresh_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+    fresh_llm = get_main_llm()
     if key not in _llm_cache:
         tools = build_tools_for_tenant(tenant_id, enabled_modules)
         if tools:

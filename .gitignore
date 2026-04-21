@@ -5,3 +5,4 @@ __pycache__
 temp*
 gen_secrets.py
 ca.pem
+test*

@@ -7,6 +7,22 @@ DEFAULT_APPOINTMENT_DURATION = 30  # In minutes
 CALENDAR_TIMEZONE = 'Asia/Kolkata'
 
 
+#--------------LLM Selection----------------
+# Options: 'groq', 'nvidia'
+LLM_PROVIDER = 'nvidia'
+
+# --- NVIDIA Models ---
+NVIDIA_API_KEY = "sample-nvidia-api-key" 
+NVIDIA_MODEL_NAME = "openai/gpt-oss-20b" 
+
+NVIDIA_SMALL_API_KEY = "nvidia-api-key2" # You can change this to a different API key
+NVIDIA_SMALL_MODEL_NAME = "openai/gpt-oss-20b"
+
+# --- Groq Models ---
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+GROQ_SMALL_MODEL_NAME = "llama-3.1-8b-instant"
+GROQ_SMALL_API_KEY = "" # Leave blank to use .env, or put your separate key here
+
 #--------------main----------------
 MAX_HISTORY         = 4
 MAX_TOOL_ITERATIONS = 2
