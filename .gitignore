@@ -6,3 +6,4 @@ temp*
 gen_secrets.py
 ca.pem
 test*
+qdrant_data/

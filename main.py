@@ -47,6 +47,7 @@ try:
         get_tenant_by_id, get_bot_config, upsert_bot_config,
         get_tenant_users, get_tenant_stats,
         get_tenant_appointments_for_date, get_tenant_appointments_range,
+        cancel_tenant_appointment_by_id,
         get_all_tenants, create_tenant, get_platform_stats,
         update_tenant_status, create_tenant_admin, get_admin_by_email,
         save_calendar_token, get_calendar_token,
@@ -466,17 +467,59 @@ async def admin_today(session=Depends(_check_admin_token)):
 async def admin_appointments(session=Depends(_check_admin_token),
                               from_date: Optional[str] = None,
                               to_date: Optional[str] = None,
-                              appt_date: Optional[str] = None):
+                              appt_date: Optional[str] = None,
+                              from_alias: Optional[str] = Query(None, alias="from"),
+                              to_alias: Optional[str] = Query(None, alias="to"),
+                              date_alias: Optional[str] = Query(None, alias="date")):
     tenant_id = session["tenant_id"]
     if not DB_AVAILABLE:
         return []
+    # Backward-compatible query params for newer admin UI
+    from_date = from_date or from_alias
+    to_date = to_date or to_alias
+    appt_date = appt_date or date_alias
     if appt_date:
-        return await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, appt_date)
+        rows = await asyncio.to_thread(get_tenant_appointments_for_date, tenant_id, appt_date)
+        for row in rows:
+            if "id" not in row and row.get("appointment_id"):
+                row["id"] = row["appointment_id"]
+        return rows
     if from_date and to_date:
-        return await asyncio.to_thread(get_tenant_appointments_range, tenant_id, from_date, to_date)
-    return await asyncio.to_thread(
+        rows = await asyncio.to_thread(get_tenant_appointments_range, tenant_id, from_date, to_date)
+        for row in rows:
+            if "id" not in row and row.get("appointment_id"):
+                row["id"] = row["appointment_id"]
+        return rows
+    rows = await asyncio.to_thread(
         get_tenant_appointments_for_date, tenant_id, date.today().isoformat()
     )
+    for row in rows:
+        if "id" not in row and row.get("appointment_id"):
+            row["id"] = row["appointment_id"]
+    return rows
+
+
+@app.get("/admin/appointments/date")
+async def admin_appointments_for_date(date: str, session=Depends(_check_admin_token)):
+    """Compatibility endpoint for updated admin UI date picker."""
+    if not DB_AVAILABLE:
+        return []
+    rows = await asyncio.to_thread(get_tenant_appointments_for_date, session["tenant_id"], date)
+    for row in rows:
+        if "id" not in row and row.get("appointment_id"):
+            row["id"] = row["appointment_id"]
+    return rows
+
+
+@app.post("/admin/appointments/{appointment_id}/cancel")
+async def admin_cancel_appointment(appointment_id: str, session=Depends(_check_admin_token)):
+    """Cancel appointment by id for admin panel actions."""
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    updated = await asyncio.to_thread(cancel_tenant_appointment_by_id, session["tenant_id"], appointment_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Appointment not found or already cancelled")
+    return {"status": "cancelled", "appointment_id": appointment_id}
 
 @app.get("/admin/users")
 async def admin_users(session=Depends(_check_admin_token)):
@@ -484,17 +527,59 @@ async def admin_users(session=Depends(_check_admin_token)):
         return []
     return await asyncio.to_thread(get_tenant_users, session["tenant_id"])
 
+
+@app.get("/admin/customers")
+async def admin_customers(session=Depends(_check_admin_token)):
+    """Compatibility endpoint mapping users -> customers shape expected by UI."""
+    if not DB_AVAILABLE:
+        return []
+    users = await asyncio.to_thread(get_tenant_users, session["tenant_id"])
+    return [{
+        "name": u.get("name"),
+        "phone_number": u.get("phone_number"),
+        "total_appointments": u.get("appointment_count", 0),
+        "last_seen": u.get("updated_at") or u.get("created_at"),
+    } for u in users]
+
 @app.get("/admin/bot-config")
 async def admin_get_config(session=Depends(_check_admin_token)):
     if not DB_AVAILABLE:
         return {}
-    return await asyncio.to_thread(get_bot_config, session["tenant_id"]) or {}
+    cfg = await asyncio.to_thread(get_bot_config, session["tenant_id"]) or {}
+    # Compatibility key for redesigned admin UI
+    if "business_hours_periods" in cfg and "available_hours_periods" not in cfg:
+        cfg["available_hours_periods"] = cfg.get("business_hours_periods")
+    return cfg
 
 @app.post("/admin/bot-config")
 async def admin_save_config(req: BotConfigRequest, session=Depends(_check_admin_token)):
     if not DB_AVAILABLE:
         raise HTTPException(status_code=503, detail="Database unavailable")
     fields = {k: v for k, v in req.dict().items() if v is not None}
+    return await asyncio.to_thread(upsert_bot_config, session["tenant_id"], **fields)
+
+
+@app.get("/admin/config")
+async def admin_get_config_compat(session=Depends(_check_admin_token)):
+    """Compatibility endpoint for newer admin UI."""
+    return await admin_get_config(session)
+
+
+@app.post("/admin/config")
+async def admin_save_config_compat(req: Request, session=Depends(_check_admin_token)):
+    """Compatibility endpoint for newer admin UI payload names."""
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    payload = await req.json()
+    if payload.get("available_hours_periods") is not None and payload.get("business_hours_periods") is None:
+        payload["business_hours_periods"] = payload.get("available_hours_periods")
+    allowed = {
+        "bot_name", "receptionist_name", "language_code", "tts_speaker",
+        "business_hours_start", "business_hours_end", "business_hours_periods",
+        "slot_duration_mins", "silence_timeout_ms", "greeting_message",
+        "business_description", "extra_prompt_context", "calendar_id",
+    }
+    fields = {k: v for k, v in payload.items() if k in allowed and v is not None}
     return await asyncio.to_thread(upsert_bot_config, session["tenant_id"], **fields)
 
 @app.post("/admin/voice-preview")

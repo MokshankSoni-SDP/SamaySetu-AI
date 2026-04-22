@@ -605,6 +605,26 @@ def update_status_by_event_id(calendar_event_id: str, status: str) -> bool:
         conn.close()
 
 
+def cancel_tenant_appointment_by_id(tenant_id: str, appointment_id: str) -> bool:
+    """Cancel a booked appointment by primary id for a tenant."""
+    sql = """
+        UPDATE appointments
+        SET status = 'CANCELLED'
+        WHERE tenant_id = %s
+          AND appointment_id = %s
+          AND status = 'BOOKED';
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (tenant_id, appointment_id))
+            updated = cur.rowcount > 0
+            conn.commit()
+            return updated
+    finally:
+        conn.close()
+
+
 def update_rescheduled_appointment(phone_number: str, old_start_time: str,
                                     new_start_time: str, new_end_time: Optional[str] = None,
                                     tenant_id: Optional[str] = None) -> bool:
