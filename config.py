@@ -12,10 +12,10 @@ CALENDAR_TIMEZONE = 'Asia/Kolkata'
 LLM_PROVIDER = 'nvidia'
 
 # --- NVIDIA Models ---
-NVIDIA_API_KEY = "sample-nvidia-api-key" 
+NVIDIA_API_KEY = "" 
 NVIDIA_MODEL_NAME = "openai/gpt-oss-20b" 
 
-NVIDIA_SMALL_API_KEY = "nvidia-api-key2" # You can change this to a different API key
+NVIDIA_SMALL_API_KEY = "" # You can change this to a different API key
 NVIDIA_SMALL_MODEL_NAME = "openai/gpt-oss-20b"
 
 # --- Groq Models ---
