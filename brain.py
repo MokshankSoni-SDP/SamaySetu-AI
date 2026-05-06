@@ -8,12 +8,14 @@ import json
 import asyncio
 import traceback
 import struct
+import os
 from collections import Counter
 from typing import Optional, List, Dict, TYPE_CHECKING
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from datetime import datetime
+from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 try:
@@ -34,26 +36,34 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
 
+load_dotenv()
+
+
 # ── LLM clients ──────────────────────────────────────────────────────────────
-import os
+LLM_PROVIDER = os.getenv("LLM_PROVIDER").strip().lower()
+
 
 def get_small_llm():
-    if config.LLM_PROVIDER == 'nvidia':
-        os.environ["NVIDIA_API_KEY"] = getattr(config, 'NVIDIA_SMALL_API_KEY', config.NVIDIA_API_KEY)
+    if LLM_PROVIDER == 'nvidia':
+        os.environ["NVIDIA_API_KEY"] = os.getenv("NVIDIA_SMALL_API_KEY").strip()
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
-        return ChatNVIDIA(model=getattr(config, 'NVIDIA_SMALL_MODEL_NAME', 'meta/llama-3.1-8b-instruct'), temperature=0)
-    else:
-        GROQ_SMALL_LLM_KEY = getattr(config, 'GROQ_SMALL_API_KEY', None) or os.getenv("GROQ_SMALL_LLM")
-        small_model = getattr(config, 'GROQ_SMALL_MODEL_NAME', 'llama-3.1-8b-instant')
-        return ChatGroq(api_key=GROQ_SMALL_LLM_KEY, model=small_model, temperature=0)
+        return ChatNVIDIA(model=os.getenv("NVIDIA_SMALL_MODEL_NAME").strip(), temperature=0)
+
+    groq_small_key = os.getenv("GROQ_SMALL_API_KEY").strip()
+    small_model = os.getenv("GROQ_SMALL_MODEL_NAME").strip()
+    return ChatGroq(api_key=groq_small_key, model=small_model, temperature=0)
+
 
 def get_main_llm():
-    if config.LLM_PROVIDER == 'nvidia':
-        os.environ["NVIDIA_API_KEY"] = config.NVIDIA_API_KEY
+    if LLM_PROVIDER == 'nvidia':
+        os.environ["NVIDIA_API_KEY"] = os.getenv("NVIDIA_API_KEY").strip()
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
-        return ChatNVIDIA(model=config.NVIDIA_MODEL_NAME, temperature=0.1)
-    else:
-        return ChatGroq(model=config.GROQ_MODEL_NAME, temperature=0.1)
+        return ChatNVIDIA(model=os.getenv("NVIDIA_MODEL_NAME").strip(), temperature=0.1)
+
+    groq_key = os.getenv("GROQ_API_KEY").strip()
+    groq_model = os.getenv("GROQ_MODEL_NAME").strip()
+    return ChatGroq(api_key=groq_key, model=groq_model, temperature=0.1)
+
 
 small_llm = get_small_llm()
 _main_llm = get_main_llm()
@@ -110,38 +120,17 @@ def _log_llm_retry(rs):
     log("[LLM_RETRY]", f"Attempt {rs.attempt_number} failed. Exception: {exc}")
     try:
         if hasattr(exc, 'body') and isinstance(exc.body, dict):
-            err = exc.body.get('error', {})
-            if 'failed_generation' in err:
-                log("[LLM_RETRY_DETAILS]", f"LLM Attempted: {err['failed_generation']}")
-            elif 'message' in err:
-                log("[LLM_RETRY_DETAILS]", f"LLM Error: {err['message']}")
+            log("[LLM_RETRY_DETAILS]", f"LLM Attempted: {exc.body.get('error', {}).get('failed_generation', '')}")
+            log("[LLM_RETRY_DETAILS]", f"LLM Error: {exc.body.get('error', {}).get('message', '')}")
     except Exception:
         pass
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=1, max=5),
-    retry=retry_if_not_exception_type((BadRequestError, ValueError)),
-    before_sleep=_log_llm_retry
-)
-async def safe_llm_call(llm_with_tools, messages):
-    return await llm_with_tools.ainvoke(messages)
-
-
-# ── Malformed tool-call recovery ──────────────────────────────────────────────
-
-def _log_groq_error(exc: Exception, label: str = "[LLM_ERROR]"):
-    """
-    Dumps every meaningful field from a Groq BadRequestError for diagnosis.
-    Call this BEFORE any recovery attempt so every failure is recorded.
-    """
-    log(label, f"Exception type : {type(exc).__name__}")
-    log(label, f"Exception str  : {str(exc)[:600]}")
+def _log_groq_error(exc: Exception, label: str):
     try:
         body = getattr(exc, 'body', None)
-        log(label, f"exc.body (raw) : {body}")
         if isinstance(body, str):
+            log(label, f"body (raw)    : {body}")
             body = json.loads(body)
         if isinstance(body, dict):
             err = body.get('error', {})
@@ -155,10 +144,70 @@ def _log_groq_error(exc: Exception, label: str = "[LLM_ERROR]"):
                 log(label, "failed_gen     : <not present>")
     except Exception as dump_err:
         log(label, f"Could not parse exc.body: {dump_err}")
-    # Also log status_code if available
     sc = getattr(exc, 'status_code', getattr(exc, 'status', None))
     if sc:
         log(label, f"HTTP status    : {sc}")
+
+load_dotenv()
+
+
+def _env(name: str, default: str = "") -> str:
+    return (os.getenv(name, default) or default).strip()
+
+
+# ── LLM clients ──────────────────────────────────────────────────────────────
+LLM_PROVIDER = _env("LLM_PROVIDER", "nvidia").lower()
+
+
+def get_small_llm():
+    if LLM_PROVIDER == 'nvidia':
+        nvidia_api_key = _env("NVIDIA_SMALL_API_KEY") or _env("NVIDIA_API_KEY")
+        if nvidia_api_key:
+            os.environ["NVIDIA_API_KEY"] = nvidia_api_key
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+        return ChatNVIDIA(
+            model=_env("NVIDIA_SMALL_MODEL_NAME", "meta/llama-3.1-8b-instruct"),
+            temperature=0,
+        )
+
+    groq_small_key = _env("GROQ_SMALL_API_KEY") or _env("GROQ_SMALL_LLM")
+    small_model = _env("GROQ_SMALL_MODEL_NAME", "llama-3.1-8b-instant")
+    return ChatGroq(api_key=groq_small_key, model=small_model, temperature=0)
+
+
+def get_main_llm():
+    if LLM_PROVIDER == 'nvidia':
+        nvidia_api_key = _env("NVIDIA_API_KEY")
+        if nvidia_api_key:
+            os.environ["NVIDIA_API_KEY"] = nvidia_api_key
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+        return ChatNVIDIA(
+            model=_env("NVIDIA_MODEL_NAME", "openai/gpt-oss-20b"),
+            temperature=0.1,
+        )
+
+    groq_key = _env("GROQ_API_KEY") or _env("GROQ_SMALL_API_KEY") or _env("GROQ_SMALL_LLM")
+    groq_model = _env("GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
+    return ChatGroq(api_key=groq_key, model=groq_model, temperature=0.1)
+
+
+small_llm = get_small_llm()
+_main_llm = get_main_llm()
+
+
+max_history       = config.MAX_HISTORY
+max_tool_iterations = config.MAX_TOOL_ITERATIONS
+min_chunk_chars   = config.MIN_CHUNK_CHARS
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=5),
+    retry=retry_if_not_exception_type((BadRequestError, ValueError)),
+    before_sleep=_log_llm_retry,
+)
+async def safe_llm_call(llm_with_tools, messages):
+    return await llm_with_tools.ainvoke(messages)
 
 
 def _log_messages_sent(messages, label: str = "[LLM_MSGS]"):
